@@ -668,6 +668,25 @@ a {
     margin-top: 2px; 
 }
 
+/* Стили для таймера */
+.stat-value#game-timer {
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
+    color: var(--accent);
+    letter-spacing: 2px;
+    transition: color 0.3s ease;
+}
+
+.stat-value#game-timer.warning {
+    color: var(--hard);
+    animation: timerPulse 1s infinite;
+}
+
+@keyframes timerPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
 .difficulty-easy {
     color: var(--easy);
 }
@@ -926,6 +945,7 @@ a {
     align-items: center;
     justify-content: center;
     z-index: 999;
+    backdrop-filter: blur(5px);
 }
 
 .modal-card {
@@ -937,6 +957,18 @@ a {
     max-width: 400px;
     width: 90%;
     position: relative;
+    animation: modalSlideIn 0.3s ease;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .modal-small {
@@ -1017,6 +1049,8 @@ a {
     border-radius: 4px;
     margin-bottom: 0.3rem;
     font-size: 0.85rem;
+    display: flex;
+    justify-content: space-between;
 }
 
 .hint-tip {
@@ -1025,6 +1059,7 @@ a {
     background: rgba(232, 255, 60, 0.1);
     border-left: 3px solid var(--accent);
     font-size: 0.8rem;
+    border-radius: 0 4px 4px 0;
 }
 
 /* Информация о пазле */
@@ -1040,6 +1075,50 @@ a {
 
 .puzzle-info p:last-child {
     border-bottom: none;
+}
+
+/* Детали игры */
+.game-details {
+    text-align: left;
+    padding: 0.5rem;
+}
+
+.game-details p {
+    margin-bottom: 0.5rem;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.game-details h3 {
+    font-family: var(--font-display);
+    font-size: 0.9rem;
+    color: var(--accent);
+    margin: 1rem 0 0.5rem;
+}
+
+.steps-history {
+    max-height: 200px;
+    overflow-y: auto;
+    background: var(--surface2);
+    padding: 0.5rem;
+    border-radius: var(--radius);
+    margin: 0.5rem 0;
+}
+
+.step-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.75rem;
+}
+
+.step-item:last-child {
+    border-bottom: none;
+}
+
+.step-item:hover {
+    background: var(--surface);
 }
 
 /* ================================================================
@@ -1118,21 +1197,54 @@ a {
 .status-solved { 
     background: rgba(60,255,160,0.1); 
     color: var(--easy); 
+    border: 1px solid var(--easy);
 }
 
 .status-abandoned { 
     background: rgba(255,79,79,0.1); 
     color: var(--hard); 
+    border: 1px solid var(--hard);
 }
 
 .status-timeout { 
     background: rgba(255,107,53,0.1); 
     color: var(--accent2); 
+    border: 1px solid var(--accent2);
 }
 
 .status-exported { 
     background: rgba(136,136,170,0.1); 
     color: var(--text-muted); 
+    border: 1px solid var(--text-muted);
+}
+
+/* ================================================================
+   ПРОГРЕСС В ИСТОРИИ
+   ================================================================ */
+
+.progress-indicator-small {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100px;
+}
+
+.progress-bar-small {
+    height: 4px;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    min-width: 35px;
+}
+
+.time-display {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--accent);
 }
 
 /* ================================================================
@@ -1319,6 +1431,10 @@ a {
     .login-tiles {
         display: none;
     }
+    
+    .progress-indicator-small {
+        width: 80px;
+    }
 }
 
 @media (max-width: 480px) {
@@ -1353,6 +1469,16 @@ a {
     .modal-actions {
         flex-direction: column;
     }
+    
+    .data-table th,
+    .data-table td {
+        padding: 8px 10px;
+        font-size: 0.75rem;
+    }
+    
+    .progress-indicator-small {
+        width: 60px;
+    }
 }
 
 /* ================================================================
@@ -1380,6 +1506,21 @@ a {
 
 .puzzle-card:nth-child(even) {
     animation-delay: 0.2s;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 30px;
+    height: 30px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
 }
 
 /* ================================================================
@@ -1428,3 +1569,22 @@ a {
 .p-2 { padding: 1rem; }
 .p-3 { padding: 1.5rem; }
 .p-4 { padding: 2rem; }
+
+/* Стили для скроллбара */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--surface);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}

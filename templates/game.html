@@ -22,6 +22,14 @@
             <div class="stat-label">Ходов</div>
             <div class="stat-value" id="steps-count">{{ active.current_step }}</div>
         </div>
+        
+        <!-- НОВЫЙ БЛОК: Таймер -->
+        <div class="stat-card">
+            <div class="stat-label">Время</div>
+            <div class="stat-value" id="game-timer">00:00</div>
+        </div>
+        <!-- КОНЕЦ НОВОГО БЛОКА -->
+        
         <div class="stat-card">
             <div class="stat-label">Не на месте</div>
             <div class="stat-value" id="misplaced-count">{{ active.misplaced_tiles }}</div>
@@ -154,30 +162,166 @@
     </div>
 </div>
 
+<!-- Модальное окно превышения времени -->
+<div class="modal" id="timeout-modal" style="display:none">
+    <div class="modal-card">
+        <div class="modal-icon">⏰</div>
+        <h2>Время вышло!</h2>
+        <p>К сожалению, вы не уложились в лимит времени</p>
+        <div class="modal-stats">
+            <div class="modal-stat-row">
+                <span>Сделано ходов:</span>
+                <strong id="timeout-steps">{{ active.current_step }}</strong>
+            </div>
+            <div class="modal-stat-row">
+                <span>Лимит времени:</span>
+                <strong>
+                    {% if active.grid_size == 3 %}08:00
+                    {% elif active.grid_size == 4 %}10:00
+                    {% elif active.grid_size == 5 %}13:00
+                    {% elif active.grid_size == 6 %}15:00
+                    {% elif active.grid_size == 7 %}18:00
+                    {% else %}15:00{% endif %}
+                </strong>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <a href="{{ url_for('index') }}" class="btn btn-primary">На главную</a>
+            <a href="{{ url_for('history') }}" class="btn btn-outline">История игр</a>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='game.js') }}"></script>
 <script>
+    // Глобальные переменные для таймера
     const GRID_SIZE = {{ active.grid_size }};
     const INITIAL_MANHATTAN = {{ active.initial_manhattan }};
     const SESSION_ID = {{ active.session_id }};
+    const TIME_LIMIT_MINUTES = {
+        3: 8,   // 8 минут для 3x3
+        4: 10,  // 10 минут для 4x4
+        5: 13,  // 13 минут для 5x5
+        6: 15,  // 15 минут для 6x6
+        7: 18   // 18 минут для 7x7
+    }[GRID_SIZE] || 15;
     
-    // Запускаем таймер
-    let startTime = new Date();
+    // Преобразуем в секунды
+    const TIME_LIMIT_SECONDS = TIME_LIMIT_MINUTES * 60;
     
-    function updateTimer() {
-        const now = new Date();
-        const diff = Math.floor((now - startTime) / 1000); // секунды
-        const minutes = Math.floor(diff / 60);
-        const seconds = diff % 60;
+    let timerSeconds = 0;
+    let timerInterval = null;
+    let timerRunning = true;
+    
+    // Функция инициализации таймера
+    function initTimer() {
+        // Пытаемся восстановить время из sessionStorage
+        const savedTime = sessionStorage.getItem('puzzle_timer_' + SESSION_ID);
+        if (savedTime) {
+            timerSeconds = parseInt(savedTime);
+        } else {
+            timerSeconds = 0;
+        }
+        
+        updateTimerDisplay();
+        
+        // Запускаем таймер
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            if (timerRunning) {
+                timerSeconds++;
+                
+                // Проверка на превышение лимита времени
+                if (timerSeconds >= TIME_LIMIT_SECONDS) {
+                    timerSeconds = TIME_LIMIT_SECONDS;
+                    updateTimerDisplay();
+                    stopTimer();
+                    showTimeoutModal();
+                } else {
+                    updateTimerDisplay();
+                }
+                
+                // Сохраняем в sessionStorage
+                sessionStorage.setItem('puzzle_timer_' + SESSION_ID, timerSeconds.toString());
+            }
+        }, 1000);
+    }
+    
+    // Обновление отображения таймера
+    function updateTimerDisplay() {
         const timerEl = document.getElementById('game-timer');
         if (timerEl) {
+            const minutes = Math.floor(timerSeconds / 60);
+            const seconds = timerSeconds % 60;
             timerEl.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            
+            // Добавляем класс предупреждения если осталось мало времени
+            const remaining = TIME_LIMIT_SECONDS - timerSeconds;
+            if (remaining < 60) { // Меньше минуты
+                timerEl.classList.add('warning');
+            } else {
+                timerEl.classList.remove('warning');
+            }
         }
     }
     
-    // Обновляем таймер каждую секунду
-    setInterval(updateTimer, 1000);
+    // Остановка таймера
+    function stopTimer() {
+        timerRunning = false;
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+    }
+    
+    // Показ модального окна при превышении времени
+    function showTimeoutModal() {
+        const modal = document.getElementById('timeout-modal');
+        const stepsEl = document.getElementById('timeout-steps');
+        const stepsCount = document.getElementById('steps-count');
+        
+        if (stepsEl && stepsCount) {
+            stepsEl.textContent = stepsCount.textContent;
+        }
+        
+        if (modal) {
+            modal.style.display = 'flex';
+            
+            // Автоматически завершаем игру через 3 секунды
+            setTimeout(() => {
+                window.location.href = "{{ url_for('index') }}";
+            }, 3000);
+        }
+    }
+    
+    // Сброс таймера (для новой игры)
+    function resetTimer() {
+        timerSeconds = 0;
+        timerRunning = true;
+        updateTimerDisplay();
+        sessionStorage.removeItem('puzzle_timer_' + SESSION_ID);
+    }
+    
+    // Сохраняем время перед уходом со страницы
+    window.addEventListener('beforeunload', function() {
+        if (timerRunning) {
+            sessionStorage.setItem('puzzle_timer_' + SESSION_ID, timerSeconds.toString());
+        }
+    });
+    
+    // Инициализация при загрузке страницы
+    document.addEventListener('DOMContentLoaded', function() {
+        initTimer();
+        
+        // Сохраняем ссылку на функцию для использования в game.js
+        window.gameTimer = {
+            stop: stopTimer,
+            getSeconds: () => timerSeconds,
+            getTimeLimit: () => TIME_LIMIT_SECONDS
+        };
+    });
 </script>
 {% endblock %}

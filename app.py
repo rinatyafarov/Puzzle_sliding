@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 import db
 import json
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 app.secret_key = "sliding_puzzle_secret_key"
@@ -26,7 +27,8 @@ def get_active_attempt(session_id):
                   GA.CURRENT_MISPLACED_TILES, GA.CURRENT_MANHATTAN_DISTANCE,
                   GA.INITIAL_MANHATTAN_DISTANCE,
                   PS.GRID_SIZE, DL.NAME AS DIFFICULTY,
-                  PZ.TARGET_STATE, PZ.ID AS PUZZLE_ID
+                  PZ.TARGET_STATE, PZ.ID AS PUZZLE_ID,
+                  GA.STARTED_AT, PS.DEFAULT_TIME_LIMIT
            FROM GAME_ATTEMPTS GA
            JOIN GAME_STATUSES GST ON GA.STATUS_ID = GST.ID
            JOIN PUZZLES PZ ON GA.PUZZLE_ID = PZ.ID
@@ -105,7 +107,7 @@ def parse_board_csv(csv_str, grid_size):
         flat = [int(x.strip()) for x in csv_str.split(",")]
     except ValueError:
         return [], []
-    
+
     board = []
     for r in range(grid_size):
         start_idx = r * grid_size
@@ -128,7 +130,7 @@ def compute_metrics(flat, target_flat, grid_size):
     manhattan = 0
     correct = 0
     n = grid_size
-    
+
     # Убеждаемся, что target_flat - плоский список
     if target_flat and len(target_flat) > 0 and isinstance(target_flat[0], list):
         # Преобразуем двумерный в плоский
@@ -136,25 +138,25 @@ def compute_metrics(flat, target_flat, grid_size):
         for row in target_flat:
             new_target.extend(row)
         target_flat = new_target
-    
+
     # Создаем словарь позиций для быстрого поиска
     target_positions = {}
     for idx, val in enumerate(target_flat):
         if val != 0:  # Не учитываем пустую клетку
             target_positions[val] = idx
-    
+
     for i, val in enumerate(flat):
         if val == 0:
             continue
-            
+
         if val in target_positions:
             target_pos = target_positions[val]
-            
+
             if i == target_pos:
                 correct += 1
             else:
                 misplaced += 1
-                
+
             cur_row, cur_col = divmod(i, n)
             tgt_row, tgt_col = divmod(target_pos, n)
             manhattan += abs(cur_row - tgt_row) + abs(cur_col - tgt_col)
@@ -163,7 +165,7 @@ def compute_metrics(flat, target_flat, grid_size):
             misplaced += 1
             # Добавляем максимальное расстояние
             manhattan += 2 * n
-    
+
     return misplaced, manhattan, correct
 
 
@@ -171,6 +173,45 @@ def progress_pct(init_manhattan, cur_manhattan):
     if init_manhattan == 0:
         return 100
     return round((init_manhattan - cur_manhattan) / init_manhattan * 100, 1)
+
+
+def check_timeout(attempt_id):
+    """Проверяет, не истекло ли время игры."""
+    result = db.fetch_one(
+        """SELECT CASE 
+                    WHEN (SYSTIMESTAMP - GA.STARTED_AT) > PS.DEFAULT_TIME_LIMIT 
+                    THEN 1 ELSE 0 END AS TIME_EXPIRED,
+                    EXTRACT(HOUR FROM (SYSTIMESTAMP - GA.STARTED_AT)) * 60 +
+                    EXTRACT(MINUTE FROM (SYSTIMESTAMP - GA.STARTED_AT)) AS ELAPSED_MINUTES,
+                    EXTRACT(HOUR FROM PS.DEFAULT_TIME_LIMIT) * 60 +
+                    EXTRACT(MINUTE FROM PS.DEFAULT_TIME_LIMIT) AS TIME_LIMIT_MINUTES
+           FROM GAME_ATTEMPTS GA
+           JOIN PUZZLES PZ ON GA.PUZZLE_ID = PZ.ID
+           JOIN PUZZLE_SIZES PS ON PZ.PUZZLE_SIZE_ID = PS.ID
+           WHERE GA.ID = :1""",
+        [attempt_id]
+    )
+    return result
+
+
+def handle_timeout(session_id, attempt_id):
+    """Обрабатывает истечение времени игры."""
+    status_timeout = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='timeout'")
+    if not status_timeout:
+        db.execute_query("INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'timeout')")
+        status_timeout = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='timeout'")
+
+    if status_timeout:
+        db.execute_query(
+            "UPDATE GAME_ATTEMPTS SET STATUS_ID=:1, FINISHED_AT=SYSTIMESTAMP WHERE ID=:2",
+            [status_timeout["id"], attempt_id]
+        )
+        db.execute_query(
+            "UPDATE GAME_SESSIONS SET STATUS_ID=:1, END_TIME=SYSDATE WHERE ID=:2",
+            [status_timeout["id"], session_id]
+        )
+        return True
+    return False
 
 
 # ================================================================
@@ -296,18 +337,18 @@ def start_game(puzzle_id):
         return redirect(url_for("index"))
 
     grid_size = puzzle["grid_size"]
-    
+
     # Читаем JSON-строки из CLOB
     init_json = read_clob(puzzle["initial_state"])
     tgt_json = read_clob(puzzle["target_state"])
-    
+
     # Преобразуем JSON в списки для вычислений
     try:
         init_data = json.loads(init_json)
         tgt_data = json.loads(tgt_json)
     except json.JSONDecodeError:
         return redirect(url_for("index"))
-    
+
     # Преобразуем в плоские списки для вычислений
     if init_data and len(init_data) > 0 and isinstance(init_data[0], list):
         init_flat = []
@@ -315,14 +356,18 @@ def start_game(puzzle_id):
             init_flat.extend(row)
     else:
         init_flat = init_data
-        
+
     if tgt_data and len(tgt_data) > 0 and isinstance(tgt_data[0], list):
         tgt_flat = []
         for row in tgt_data:
             tgt_flat.extend(row)
     else:
         tgt_flat = tgt_data
-    
+
+    # Нормализуем состояние: всегда храним как плоский JSON список
+    init_json = json.dumps(init_flat)
+    tgt_json = json.dumps(tgt_flat)
+
     # Вычисляем метрики
     misplaced, manhattan, correct = compute_metrics(init_flat, tgt_flat, grid_size)
 
@@ -332,7 +377,7 @@ def start_game(puzzle_id):
         db.execute_query("INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'active')")
         status_active_row = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='active'")
     status_active = status_active_row["id"]
-    
+
     action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     if not action_move_row:
         db.execute_query("INSERT INTO ACTION_TYPES (ID, NAME) VALUES (SEQ_ACTION_TYPES.NEXTVAL, 'move')")
@@ -342,7 +387,7 @@ def start_game(puzzle_id):
     # Создать сессию
     timestamp_row = db.fetch_one("SELECT TO_CHAR(SYSDATE, 'YYYYMMDDHH24MISS') AS T FROM DUAL")
     token = f"{user_id}_{puzzle_id}_{timestamp_row['t']}"
-    
+
     db.execute_query(
         """INSERT INTO GAME_SESSIONS
                (ID, USER_ID, PUZZLE_ID, STATUS_ID, SESSION_TOKEN,
@@ -351,12 +396,12 @@ def start_game(puzzle_id):
                    0, SYSTIMESTAMP, SYSDATE)""",
         [user_id, puzzle_id, status_active, token]
     )
-    
+
     gs = db.fetch_one("SELECT ID FROM GAME_SESSIONS WHERE SESSION_TOKEN=:1", [token])
     if not gs:
         gs = db.fetch_one(
-            "SELECT ID FROM GAME_SESSIONS WHERE USER_ID = :1 AND SESSION_TOKEN LIKE :2 ORDER BY ID DESC",
-            [user_id, f"{user_id}_{puzzle_id}%"]
+            "SELECT ID FROM GAME_SESSIONS WHERE USER_ID = :1 AND ROWNUM = 1 ORDER BY ID DESC",
+            [user_id]
         )
     gs_id = gs["id"]
 
@@ -372,13 +417,8 @@ def start_game(puzzle_id):
         [gs_id, user_id, puzzle_id, init_json,
          misplaced, manhattan, misplaced, manhattan, status_active]
     )
-    
+
     ga = db.fetch_one("SELECT ID FROM GAME_ATTEMPTS WHERE SESSION_ID=:1 AND ROWNUM=1", [gs_id])
-    if not ga:
-        ga = db.fetch_one(
-            "SELECT ID FROM GAME_ATTEMPTS WHERE SESSION_ID = :1 ORDER BY ID DESC",
-            [gs_id]
-        )
     ga_id = ga["id"]
 
     # Записать шаг 0 (начальное состояние)
@@ -426,6 +466,13 @@ def game():
     misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
     pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
 
+    # Получаем лимит времени в минутах для передачи в шаблон
+    time_limit = db.fetch_one(
+        "SELECT EXTRACT(HOUR FROM DEFAULT_TIME_LIMIT) * 60 + EXTRACT(MINUTE FROM DEFAULT_TIME_LIMIT) AS TIME_LIMIT_MINUTES FROM PUZZLE_SIZES WHERE GRID_SIZE = :1",
+        [grid_size]
+    )
+    time_limit_minutes = time_limit["time_limit_minutes"] if time_limit else 15
+
     active = {
         "session_id": gsid,
         "grid_size": grid_size,
@@ -435,6 +482,7 @@ def game():
         "manhattan_distance": manhattan,
         "progress_pct": pct,
         "initial_manhattan": attempt["initial_manhattan_distance"],
+        "time_limit_minutes": time_limit_minutes
     }
 
     return render_template(
@@ -443,6 +491,36 @@ def game():
         board=board,
         username=session.get("username")
     )
+
+
+# ================================================================
+# ИГРА -- ПРОВЕРКА ТАЙМАУТА
+# ================================================================
+
+@app.route("/game/check-timeout", methods=["POST"])
+def check_timeout_endpoint():
+    """Проверяет, не истекло ли время игры."""
+    if not get_current_user_id():
+        return jsonify({"error": "Не авторизован"}), 401
+
+    gsid = get_active_session_id()
+    if not gsid:
+        return jsonify({"error": "Нет активной игровой сессии"}), 400
+
+    attempt = get_active_attempt(gsid)
+    if not attempt:
+        return jsonify({"error": "Нет активной попытки"}), 400
+
+    # Проверяем время
+    timeout_check = check_timeout(attempt["id"])
+
+    if timeout_check and timeout_check.get("time_expired") == 1:
+        # Завершаем игру по таймауту
+        if handle_timeout(gsid, attempt["id"]):
+            session.pop("game_session_id", None)
+            return jsonify({"timeout": True, "message": "Время вышло"})
+
+    return jsonify({"timeout": False})
 
 
 # ================================================================
@@ -461,17 +539,25 @@ def make_move():
     gsid = get_active_session_id()
     if not gsid:
         return jsonify({"error": "Нет активной игровой сессии"}), 400
-        
+
     attempt = get_active_attempt(gsid)
     if not attempt:
         return jsonify({"error": "Нет активной попытки"}), 400
 
+    # Проверка времени перед ходом
+    timeout_check = check_timeout(attempt["id"])
+    if timeout_check and timeout_check.get("time_expired") == 1:
+        # Завершаем игру по таймауту
+        if handle_timeout(gsid, attempt["id"]):
+            session.pop("game_session_id", None)
+            return jsonify({"error": "Время вышло"}), 400
+
     grid_size = attempt["grid_size"]
-    
+
     # Читаем текущее состояние как JSON
     current_state_json = read_clob(attempt["current_state"])
     target_state_json = read_clob(attempt["target_state"])
-    
+
     board, flat = parse_board(current_state_json, grid_size)
     _, tgt_flat = parse_board(target_state_json, grid_size)
 
@@ -493,14 +579,14 @@ def make_move():
 
     # Выполнить ход
     flat[empty_pos], flat[tile_pos] = flat[tile_pos], flat[empty_pos]
-    
+
     # Сохраняем состояние как JSON
     new_state_json = json.dumps(flat)
 
     # Вычисляем метрики
     misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
     next_idx = attempt["undo_pointer"] + 1
-    
+
     # Получаем ID действия 'move' с проверкой
     action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     if not action_move_row:
@@ -550,7 +636,7 @@ def make_move():
             db.execute_query("INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'solved')")
             status_solved_row = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='solved'")
         status_solved = status_solved_row["id"]
-        
+
         db.execute_query(
             "UPDATE GAME_ATTEMPTS SET STATUS_ID=:1, FINISHED_AT=SYSTIMESTAMP WHERE ID=:2",
             [status_solved, attempt["id"]]
@@ -561,9 +647,9 @@ def make_move():
         )
         session.pop("game_session_id", None)
         return jsonify({
-            "status": "solved", 
-            "board": board, 
-            "steps": next_idx, 
+            "status": "solved",
+            "board": board,
+            "steps": next_idx,
             "progress": 100,
             "misplaced": 0,
             "manhattan": 0
@@ -591,17 +677,24 @@ def undo_move():
     gsid = get_active_session_id()
     if not gsid:
         return jsonify({"error": "Нет активной игровой сессии"}), 400
-        
+
     attempt = get_active_attempt(gsid)
     if not attempt or attempt["undo_pointer"] <= 0:
         return jsonify({"error": "Нет ходов для отмены"}), 400
 
+    # Проверка времени перед отменой
+    timeout_check = check_timeout(attempt["id"])
+    if timeout_check and timeout_check.get("time_expired") == 1:
+        if handle_timeout(gsid, attempt["id"]):
+            session.pop("game_session_id", None)
+            return jsonify({"error": "Время вышло"}), 400
+
     grid_size = attempt["grid_size"]
-    
+
     # Получаем целевое состояние
     target_state_json = read_clob(attempt["target_state"])
     _, tgt_flat = parse_board(target_state_json, grid_size)
-    
+
     prev_idx = attempt["undo_pointer"] - 1
 
     prev_step = db.fetch_one(
@@ -614,7 +707,7 @@ def undo_move():
     # Читаем предыдущее состояние как JSON
     prev_state_json = read_clob(prev_step["state_after"])
     _, flat = parse_board(prev_state_json, grid_size)
-    
+
     misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
 
     db.execute_query(
@@ -629,9 +722,9 @@ def undo_move():
     pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
 
     return jsonify({
-        "status": "ok", 
-        "board": board, 
-        "steps": prev_idx, 
+        "status": "ok",
+        "board": board,
+        "steps": prev_idx,
         "progress": pct,
         "misplaced": misplaced,
         "manhattan": manhattan
@@ -650,17 +743,24 @@ def redo_move():
     gsid = get_active_session_id()
     if not gsid:
         return jsonify({"error": "Нет активной игровой сессии"}), 400
-        
+
     attempt = get_active_attempt(gsid)
     if not attempt:
         return jsonify({"error": "Нет активной попытки"}), 400
 
+    # Проверка времени перед возвратом
+    timeout_check = check_timeout(attempt["id"])
+    if timeout_check and timeout_check.get("time_expired") == 1:
+        if handle_timeout(gsid, attempt["id"]):
+            session.pop("game_session_id", None)
+            return jsonify({"error": "Время вышло"}), 400
+
     grid_size = attempt["grid_size"]
-    
+
     # Получаем целевое состояние
     target_state_json = read_clob(attempt["target_state"])
     _, tgt_flat = parse_board(target_state_json, grid_size)
-    
+
     next_idx = attempt["undo_pointer"] + 1
 
     next_step = db.fetch_one(
@@ -675,7 +775,7 @@ def redo_move():
     # Читаем следующее состояние как JSON
     next_state_json = read_clob(next_step["state_after"])
     _, flat = parse_board(next_state_json, grid_size)
-    
+
     misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
 
     db.execute_query(
@@ -690,12 +790,52 @@ def redo_move():
     pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
 
     return jsonify({
-        "status": "ok", 
-        "board": board, 
-        "steps": next_idx, 
+        "status": "ok",
+        "board": board,
+        "steps": next_idx,
         "progress": pct,
         "misplaced": misplaced,
         "manhattan": manhattan
+    })
+
+
+# ================================================================
+# ИГРА -- ПОДСКАЗКА
+# ================================================================
+
+@app.route("/game/hint", methods=["POST"])
+def get_hint():
+    """Возвращает подсказку с метриками текущего состояния."""
+    if not get_current_user_id():
+        return jsonify({"error": "Не авторизован"}), 401
+
+    gsid = get_active_session_id()
+    if not gsid:
+        return jsonify({"error": "Нет активной игровой сессии"}), 400
+
+    attempt = get_active_attempt(gsid)
+    if not attempt:
+        return jsonify({"error": "Нет активной попытки"}), 400
+
+    grid_size = attempt["grid_size"]
+
+    # Читаем текущее состояние
+    current_state_json = read_clob(attempt["current_state"])
+    target_state_json = read_clob(attempt["target_state"])
+
+    _, flat = parse_board(current_state_json, grid_size)
+    _, tgt_flat = parse_board(target_state_json, grid_size)
+
+    # Вычисляем метрики
+    misplaced, manhattan, correct = compute_metrics(flat, tgt_flat, grid_size)
+    pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
+
+    return jsonify({
+        "misplaced": misplaced,
+        "manhattan": manhattan,
+        "correct": correct,
+        "progress": pct,
+        "steps": attempt["undo_pointer"]
     })
 
 
@@ -715,7 +855,7 @@ def game_over():
             db.execute_query("INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'abandoned')")
             status_abandoned_row = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='abandoned'")
         status_abandoned = status_abandoned_row["id"]
-        
+
         db.execute_query(
             "UPDATE GAME_ATTEMPTS SET STATUS_ID=:1, FINISHED_AT=SYSTIMESTAMP WHERE SESSION_ID=:2",
             [status_abandoned, gsid]
