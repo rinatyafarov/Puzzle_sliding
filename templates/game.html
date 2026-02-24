@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}Пятнашки — Игра{% endblock %}
+
+{% block content %}
+
+<div class="game-layout">
+
+    <!-- Боковая панель -->
+    <aside class="game-sidebar">
+        <div class="stat-card">
+            <div class="stat-label">Сложность</div>
+            <div class="stat-value difficulty-{{ active.difficulty | lower }}">
+                {{ active.difficulty }}
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Размер</div>
+            <div class="stat-value">{{ active.grid_size }}×{{ active.grid_size }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Ходов</div>
+            <div class="stat-value" id="steps-count">{{ active.current_step }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Не на месте</div>
+            <div class="stat-value" id="misplaced-count">{{ active.misplaced_tiles }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Манхэттен</div>
+            <div class="stat-value" id="manhattan-distance">{{ active.manhattan_distance }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Прогресс</div>
+            <div class="stat-value" id="progress-pct">{{ active.progress_pct }}%</div>
+        </div>
+
+        <div class="progress-bar-wrap">
+            <div class="progress-bar" id="progress-bar" style="width: {{ active.progress_pct }}%"></div>
+        </div>
+
+        <div class="game-controls">
+            <button class="btn btn-outline btn-full" id="btn-undo" {% if active.current_step == 0 %}disabled{% endif %}>
+                ↩ Отмена
+            </button>
+            <button class="btn btn-outline btn-full" id="btn-redo" disabled>
+                ↪ Вернуть
+            </button>
+            <button class="btn btn-outline btn-full" id="btn-hint">
+                💡 Подсказка
+            </button>
+            <form method="POST" action="{{ url_for('game_over') }}" style="width: 100%;">
+                <button type="submit" class="btn btn-danger btn-full">✕ Сдаться</button>
+            </form>
+        </div>
+
+        <div class="game-shortcuts">
+            <div class="shortcuts-title">Горячие клавиши:</div>
+            <div class="shortcut-item"><span class="key">1-9</span> - выбрать плитку</div>
+            <div class="shortcut-item"><span class="key">Z</span> - отмена</div>
+            <div class="shortcut-item"><span class="key">Y</span> - вернуть</div>
+            <div class="shortcut-item"><span class="key">H</span> - подсказка</div>
+        </div>
+    </aside>
+
+    <!-- Игровое поле -->
+    <div class="game-area">
+        <div id="message" class="game-message" style="display:none"></div>
+
+        <div class="board-container board-size-{{ active.grid_size }}">
+            <div class="board" id="board"
+                 data-size="{{ active.grid_size }}"
+                 style="--grid-size: {{ active.grid_size }}">
+                {% for row in board %}
+                    {% for tile in row %}
+                    <div class="tile {% if tile == 0 %}tile-empty{% endif %}"
+                         data-value="{{ tile }}"
+                         data-row="{{ loop.index0 }}"
+                         data-col="{{ loop.index0 }}"
+                         {% if tile != 0 %}onclick="moveTile({{ tile }})"{% endif %}>
+                        {% if tile != 0 %}
+                            <span class="tile-number">{{ tile }}</span>
+                        {% else %}
+                            <span class="tile-empty-symbol">◻</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Мини-карта для больших полей -->
+        {% if active.grid_size >= 5 %}
+        <div class="mini-map">
+            <div class="mini-map-title">Мини-карта</div>
+            <div class="mini-board" data-size="{{ active.grid_size }}">
+                {% for row in board %}
+                    {% for tile in row %}
+                    <div class="mini-tile {% if tile == 0 %}mini-empty{% endif %}"
+                         data-value="{{ tile }}">
+                        {% if tile != 0 and tile < 100 %}
+                            {{ tile }}
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- Модальное окно победы -->
+<div class="modal" id="win-modal" style="display:none">
+    <div class="modal-card">
+        <div class="modal-icon">🏆</div>
+        <h2>Решено!</h2>
+        <p>Вы решили головоломку</p>
+        <div class="modal-stats">
+            <div class="modal-stat-row">
+                <span>Размер поля:</span>
+                <strong>{{ active.grid_size }}×{{ active.grid_size }}</strong>
+            </div>
+            <div class="modal-stat-row">
+                <span>Сложность:</span>
+                <strong class="difficulty-{{ active.difficulty | lower }}">{{ active.difficulty }}</strong>
+            </div>
+            <div class="modal-stat-row">
+                <span>Сделано ходов:</span>
+                <strong id="final-steps"></strong>
+            </div>
+            <div class="modal-stat-row">
+                <span>Время:</span>
+                <strong id="final-time">--:--</strong>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <a href="{{ url_for('index') }}" class="btn btn-primary">На главную</a>
+            <a href="{{ url_for('leaderboard') }}" class="btn btn-outline">Таблица лидеров</a>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно подсказки -->
+<div class="modal" id="hint-modal" style="display:none">
+    <div class="modal-card modal-small">
+        <div class="modal-icon">💡</div>
+        <h2>Подсказка</h2>
+        <div id="hint-content" class="hint-content">
+            <p>Анализ текущей позиции...</p>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="document.getElementById('hint-modal').style.display='none'">Закрыть</button>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='game.js') }}"></script>
+<script>
+    const GRID_SIZE = {{ active.grid_size }};
+    const INITIAL_MANHATTAN = {{ active.initial_manhattan }};
+    const SESSION_ID = {{ active.session_id }};
+    
+    // Запускаем таймер
+    let startTime = new Date();
+    
+    function updateTimer() {
+        const now = new Date();
+        const diff = Math.floor((now - startTime) / 1000); // секунды
+        const minutes = Math.floor(diff / 60);
+        const seconds = diff % 60;
+        const timerEl = document.getElementById('game-timer');
+        if (timerEl) {
+            timerEl.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+    }
+    
+    // Обновляем таймер каждую секунду
+    setInterval(updateTimer, 1000);
+</script>
+{% endblock %}

@@ -1,0 +1,1430 @@
+/* ================================================================
+   ПЯТНАШКИ — Стили
+   ================================================================ */
+
+:root {
+    --bg: #0f0f13;
+    --surface: #1a1a22;
+    --surface2: #22222e;
+    --border: #2e2e3e;
+    --accent: #e8ff3c;
+    --accent2: #ff6b35;
+    --text: #f0f0f5;
+    --text-muted: #8888aa;
+    --easy: #3cffa0;
+    --medium: #ffcc3c;
+    --hard: #ff4f4f;
+    --radius: 10px;
+    --font-display: 'Unbounded', sans-serif;
+    --font-mono: 'Space Mono', monospace;
+}
+
+* { 
+    box-sizing: border-box; 
+    margin: 0; 
+    padding: 0; 
+}
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+}
+
+a { 
+    color: inherit; 
+    text-decoration: none; 
+}
+
+/* ================================================================
+   NAVBAR
+   ================================================================ */
+
+.navbar {
+    display: flex;
+    align-items: center;
+    padding: 0 2rem;
+    height: 60px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.nav-logo {
+    font-family: var(--font-display);
+    font-weight: 900;
+    font-size: 1.1rem;
+    color: var(--accent);
+    letter-spacing: 2px;
+    margin-right: 2rem;
+}
+
+.nav-links {
+    display: flex;
+    gap: 1.5rem;
+    flex: 1;
+}
+
+.nav-links a {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    transition: color 0.2s;
+}
+
+.nav-links a:hover,
+.nav-links a.active {
+    color: var(--text);
+}
+
+.nav-game-btn {
+    background: var(--accent) !important;
+    color: var(--bg) !important;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-weight: 700;
+}
+
+.nav-user {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.nav-user a {
+    color: var(--text-muted);
+    transition: color 0.2s;
+}
+
+.nav-user a:hover { 
+    color: var(--hard); 
+}
+
+/* ================================================================
+   КОНТЕЙНЕР
+   ================================================================ */
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+/* ================================================================
+   КНОПКИ
+   ================================================================ */
+
+.btn {
+    display: inline-block;
+    padding: 10px 20px;
+    border-radius: var(--radius);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+    text-align: center;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+.btn-primary:hover { 
+    background: #d4e834; 
+}
+
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.btn-outline:hover { 
+    border-color: var(--accent); 
+    color: var(--accent); 
+}
+
+.btn-danger {
+    background: transparent;
+    border: 1px solid var(--hard);
+    color: var(--hard);
+}
+
+.btn-danger:hover { 
+    background: var(--hard); 
+    color: white; 
+}
+
+.btn-sm { 
+    padding: 6px 14px; 
+    font-size: 0.75rem; 
+}
+
+.btn-full { 
+    width: 100%; 
+    display: block; 
+}
+
+.btn-large {
+    padding: 12px 24px;
+    font-size: 1rem;
+}
+
+.btn-disabled { 
+    opacity: 0.3; 
+    cursor: not-allowed; 
+    pointer-events: none;
+}
+
+.btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ================================================================
+   СЕКЦИИ
+   ================================================================ */
+
+.section { 
+    margin-bottom: 3rem; 
+}
+
+.section-title {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* ================================================================
+   БАННЕР АКТИВНОЙ ИГРЫ
+   ================================================================ */
+
+.banner-active {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(135deg, var(--surface2), var(--surface));
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 1rem 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.banner-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.9rem;
+    flex-wrap: wrap;
+}
+
+.banner-icon {
+    font-size: 1.2rem;
+}
+
+.banner-size {
+    background: var(--bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: var(--font-display);
+}
+
+.banner-difficulty {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.banner-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* ================================================================
+   ИГРА ДНЯ
+   ================================================================ */
+
+.daily-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(135deg, var(--surface), var(--surface2));
+    border: 2px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 1.5rem 2rem;
+    box-shadow: 0 0 20px rgba(232, 255, 60, 0.1);
+}
+
+.daily-info {
+    flex: 1;
+}
+
+.daily-badge {
+    font-family: var(--font-display);
+    font-size: 0.8rem;
+    font-weight: 900;
+    letter-spacing: 3px;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+}
+
+.daily-meta { 
+    display: flex; 
+    gap: 0.5rem; 
+    margin-bottom: 0.5rem; 
+}
+
+.daily-seed { 
+    font-size: 0.75rem; 
+    color: var(--text-muted); 
+}
+
+.daily-seed code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.daily-played {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.daily-record {
+    color: var(--accent2);
+    font-size: 0.8rem;
+    margin-top: 0.3rem;
+}
+
+/* ================================================================
+   ТЕГИ / БЕЙДЖИ
+   ================================================================ */
+
+.tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+}
+
+.tag-easy { 
+    border-color: var(--easy); 
+    color: var(--easy); 
+}
+
+.tag-medium { 
+    border-color: var(--medium); 
+    color: var(--medium); 
+}
+
+.tag-hard { 
+    border-color: var(--hard); 
+    color: var(--hard); 
+}
+
+.tag-size {
+    background: var(--bg);
+    border-color: var(--text-muted);
+    color: var(--text-muted);
+}
+
+/* ================================================================
+   ФИЛЬТРЫ
+   ================================================================ */
+
+.filters-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.2rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: flex-end;
+}
+
+.filter-group {
+    flex: 1;
+    min-width: 180px;
+}
+
+.filter-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-bottom: 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.filter-bar, .size-filter-bar {
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+}
+
+.filter-btn, .size-filter-btn {
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.filter-btn:hover, .size-filter-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.filter-btn.active, .size-filter-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+    font-weight: 700;
+}
+
+/* Поле поиска */
+.search-box {
+    width: 100%;
+}
+
+.search-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.search-input:focus {
+    border-color: var(--accent);
+}
+
+/* Выпадающий список сортировки */
+.sort-select {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    outline: none;
+    cursor: pointer;
+}
+
+/* Статистика фильтров */
+.filter-stats {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    text-align: right;
+}
+
+/* ================================================================
+   СЕТКА ПАЗЛОВ
+   ================================================================ */
+
+.puzzles-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
+}
+
+.puzzle-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(20px);
+}
+
+.puzzle-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+}
+
+.puzzle-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.puzzle-badges {
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+}
+
+.daily-indicator {
+    color: gold;
+    font-size: 1.2rem;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.puzzle-seed { 
+    font-size: 0.75rem; 
+    color: var(--text-muted); 
+    word-break: break-all;
+    font-family: monospace;
+    background: var(--surface2);
+    padding: 4px 6px;
+    border-radius: 4px;
+}
+
+/* Мини-превью поля */
+.puzzle-preview {
+    display: flex;
+    justify-content: center;
+    margin: 0.5rem 0;
+}
+
+.mini-preview {
+    display: grid;
+    gap: 2px;
+    width: 100%;
+    max-width: 120px;
+    background: var(--bg);
+    padding: 4px;
+    border-radius: 6px;
+}
+
+.preview-cell {
+    aspect-ratio: 1;
+    background: var(--surface2);
+    border-radius: 2px;
+}
+
+.preview-empty {
+    background: var(--bg);
+    border: 1px dashed var(--border);
+}
+
+/* Статистика в карточке */
+.puzzle-stats {
+    display: flex;
+    justify-content: space-around;
+    padding: 0.5rem 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.stat-icon {
+    font-size: 0.9rem;
+}
+
+/* Индикатор прогресса */
+.progress-indicator {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progress-bar-small {
+    height: 100%;
+    background: var(--easy);
+    transition: width 0.3s ease;
+}
+
+/* Кнопка играть */
+.btn-play {
+    background: var(--accent);
+    color: var(--bg);
+    font-weight: 700;
+    transition: all 0.2s;
+}
+
+.btn-play:hover {
+    background: #d4e834;
+    transform: scale(1.02);
+}
+
+/* Пустое состояние */
+.empty-state {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 4rem 2rem;
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+}
+
+.empty-icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.empty-state h3 {
+    font-family: var(--font-display);
+    margin-bottom: 0.5rem;
+    color: var(--text-muted);
+}
+
+.empty-state p {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+/* Пустой поиск */
+.empty-search {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Кнопка загрузки ещё */
+.load-more {
+    text-align: center;
+    margin-top: 2rem;
+}
+
+/* ================================================================
+   ИГРОВОЕ ПОЛЕ
+   ================================================================ */
+
+.game-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 2rem;
+    align-items: start;
+}
+
+/* Боковая панель */
+.game-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.8rem 1rem;
+}
+
+.stat-label { 
+    font-size: 0.65rem; 
+    color: var(--text-muted); 
+    text-transform: uppercase; 
+    letter-spacing: 1px; 
+}
+
+.stat-value { 
+    font-family: var(--font-display); 
+    font-size: 1.2rem; 
+    font-weight: 700; 
+    margin-top: 2px; 
+}
+
+.difficulty-easy {
+    color: var(--easy);
+}
+
+.difficulty-medium {
+    color: var(--medium);
+}
+
+.difficulty-hard {
+    color: var(--hard);
+}
+
+.progress-bar-wrap {
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 0.5rem 0;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.4s ease;
+}
+
+.game-controls { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 0.5rem; 
+    margin-top: 0.5rem; 
+}
+
+/* Горячие клавиши */
+.game-shortcuts {
+    margin-top: 1rem;
+    padding: 0.8rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 0.7rem;
+}
+
+.shortcuts-title {
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    font-weight: 700;
+}
+
+.shortcut-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.3rem;
+    color: var(--text-muted);
+}
+
+.key {
+    display: inline-block;
+    min-width: 24px;
+    padding: 2px 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text);
+    margin-right: 8px;
+}
+
+/* Доска */
+.game-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+.board-container {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+.board-container.board-size-3 {
+    max-width: 400px;
+}
+
+.board-container.board-size-4 {
+    max-width: 450px;
+}
+
+.board-container.board-size-5 {
+    max-width: 500px;
+}
+
+.board-container.board-size-6 {
+    max-width: 550px;
+}
+
+.board {
+    display: grid;
+    grid-template-columns: repeat(var(--grid-size), 1fr);
+    gap: 6px;
+    width: 100%;
+    aspect-ratio: 1;
+}
+
+.tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    font-family: var(--font-display);
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.12s;
+    user-select: none;
+}
+
+.tile-number {
+    font-weight: 700;
+}
+
+.tile-empty-symbol {
+    opacity: 0.3;
+    font-size: 1.2em;
+}
+
+.tile:hover:not(.tile-empty) {
+    background: var(--surface2);
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: scale(1.04);
+}
+
+.tile.tile-empty {
+    background: var(--bg);
+    border-color: var(--bg);
+    cursor: default;
+}
+
+.tile.tile-moved {
+    border-color: var(--accent);
+    background: var(--surface2);
+}
+
+/* Размеры плиток для разных досок */
+.board[data-size="3"] .tile {
+    font-size: clamp(1.5rem, 5vw, 2.5rem);
+}
+
+.board[data-size="4"] .tile {
+    font-size: clamp(1.2rem, 4vw, 2rem);
+}
+
+.board[data-size="5"] .tile {
+    font-size: clamp(1rem, 3vw, 1.5rem);
+}
+
+.board[data-size="6"] .tile {
+    font-size: clamp(0.8rem, 2.5vw, 1.2rem);
+}
+
+.game-message {
+    padding: 10px 20px;
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    font-weight: 700;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+}
+
+.game-message.error { 
+    border-color: var(--hard); 
+    color: var(--hard); 
+}
+
+.game-message.success { 
+    border-color: var(--easy); 
+    color: var(--easy); 
+}
+
+/* Мини-карта */
+.mini-map {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    width: fit-content;
+}
+
+.mini-map-title {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.mini-board {
+    display: grid;
+    gap: 2px;
+    background: var(--surface2);
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.mini-board[data-size="3"] { 
+    grid-template-columns: repeat(3, 25px); 
+}
+
+.mini-board[data-size="4"] { 
+    grid-template-columns: repeat(4, 22px); 
+}
+
+.mini-board[data-size="5"] { 
+    grid-template-columns: repeat(5, 20px); 
+}
+
+.mini-board[data-size="6"] { 
+    grid-template-columns: repeat(6, 18px); 
+}
+
+.mini-tile {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.mini-tile.mini-empty {
+    background: var(--bg);
+    border-color: var(--bg);
+}
+
+/* ================================================================
+   МОДАЛЬНЫЕ ОКНА
+   ================================================================ */
+
+.modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 999;
+}
+
+.modal-card {
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 2rem;
+    text-align: center;
+    max-width: 400px;
+    width: 90%;
+    position: relative;
+}
+
+.modal-small {
+    max-width: 300px;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.modal-header h2 {
+    font-family: var(--font-display);
+    font-size: 1.2rem;
+    color: var(--text);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 5px;
+}
+
+.modal-close:hover {
+    color: var(--hard);
+}
+
+.modal-icon { 
+    font-size: 3rem; 
+    margin-bottom: 1rem; 
+}
+
+.modal-card h2 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+}
+
+.modal-stats {
+    margin: 1.5rem 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.modal-stat-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-stat-row:last-child {
+    border-bottom: none;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+}
+
+/* Подсказка */
+.hint-content {
+    text-align: left;
+    margin: 1rem 0;
+}
+
+.hint-stat {
+    padding: 0.5rem;
+    background: var(--surface2);
+    border-radius: 4px;
+    margin-bottom: 0.3rem;
+    font-size: 0.85rem;
+}
+
+.hint-tip {
+    margin-top: 1rem;
+    padding: 0.5rem;
+    background: rgba(232, 255, 60, 0.1);
+    border-left: 3px solid var(--accent);
+    font-size: 0.8rem;
+}
+
+/* Информация о пазле */
+.puzzle-info {
+    padding: 1rem;
+}
+
+.puzzle-info p {
+    margin-bottom: 0.8rem;
+    padding-bottom: 0.8rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.puzzle-info p:last-child {
+    border-bottom: none;
+}
+
+/* ================================================================
+   ТАБЛИЦЫ
+   ================================================================ */
+
+.table-wrap { 
+    overflow-x: auto; 
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.data-table th {
+    padding: 10px 14px;
+    text-align: left;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+}
+
+.data-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+}
+
+.data-table tr:hover td { 
+    background: var(--surface2); 
+}
+
+.row-current td { 
+    color: var(--accent); 
+}
+
+.rank { 
+    font-family: var(--font-display); 
+    font-weight: 700; 
+}
+
+.player-name { 
+    font-weight: 700; 
+}
+
+.mini-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mini-bar {
+    height: 6px;
+    background: var(--accent);
+    border-radius: 3px;
+    min-width: 2px;
+    max-width: 80px;
+}
+
+/* ================================================================
+   СТАТУСЫ
+   ================================================================ */
+
+.status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.status-solved { 
+    background: rgba(60,255,160,0.1); 
+    color: var(--easy); 
+}
+
+.status-abandoned { 
+    background: rgba(255,79,79,0.1); 
+    color: var(--hard); 
+}
+
+.status-timeout { 
+    background: rgba(255,107,53,0.1); 
+    color: var(--accent2); 
+}
+
+.status-exported { 
+    background: rgba(136,136,170,0.1); 
+    color: var(--text-muted); 
+}
+
+/* ================================================================
+   ЛОГИН
+   ================================================================ */
+
+.login-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: var(--bg);
+}
+
+.login-wrapper {
+    display: flex;
+    gap: 4rem;
+    align-items: center;
+}
+
+.login-card {
+    width: 340px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 2.5rem;
+}
+
+.login-logo {
+    font-family: var(--font-display);
+    font-size: 3rem;
+    font-weight: 900;
+    color: var(--accent);
+    text-align: center;
+    margin-bottom: 0.5rem;
+}
+
+.login-title {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 900;
+    letter-spacing: 4px;
+    text-align: center;
+    margin-bottom: 0.5rem;
+}
+
+.login-subtitle {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-bottom: 2rem;
+}
+
+.login-hint {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    margin-top: 1rem;
+}
+
+.form-group { 
+    margin-bottom: 1rem; 
+}
+
+.form-input {
+    width: 100%;
+    padding: 12px 16px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.form-input:focus { 
+    border-color: var(--accent); 
+}
+
+.alert {
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+}
+
+.alert-error { 
+    background: rgba(255,79,79,0.1); 
+    border: 1px solid var(--hard); 
+    color: var(--hard); 
+}
+
+/* Декоративные плитки на логин-странице */
+.login-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, 80px);
+    grid-template-rows: repeat(3, 80px);
+    gap: 6px;
+    opacity: 0.5;
+}
+
+.demo-tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+    animation: float 3s ease-in-out infinite;
+}
+
+.demo-tile:nth-child(odd) { 
+    animation-delay: 0.5s; 
+}
+
+.demo-tile.empty { 
+    background: var(--bg); 
+    border-color: var(--bg); 
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+}
+
+/* ================================================================
+   АДАПТИВНОСТЬ
+   ================================================================ */
+
+@media (max-width: 768px) {
+    .navbar {
+        padding: 0 1rem;
+    }
+    
+    .nav-links {
+        gap: 0.8rem;
+    }
+    
+    .container {
+        padding: 1rem;
+    }
+    
+    .game-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .filters-container {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .filter-group {
+        width: 100%;
+    }
+    
+    .banner-active {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+    }
+    
+    .banner-content {
+        justify-content: center;
+    }
+    
+    .daily-card {
+        flex-direction: column;
+        gap: 1.5rem;
+        text-align: center;
+    }
+    
+    .login-wrapper {
+        flex-direction: column;
+        gap: 2rem;
+        padding: 1rem;
+    }
+    
+    .login-tiles {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .navbar {
+        height: auto;
+        flex-wrap: wrap;
+        padding: 0.5rem;
+    }
+    
+    .nav-logo {
+        margin-right: 0;
+        width: 100%;
+        text-align: center;
+        margin-bottom: 0.5rem;
+    }
+    
+    .nav-links {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .nav-user {
+        width: 100%;
+        justify-content: center;
+        margin-top: 0.5rem;
+    }
+    
+    .puzzles-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .modal-actions {
+        flex-direction: column;
+    }
+}
+
+/* ================================================================
+   АНИМАЦИИ
+   ================================================================ */
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.puzzle-card {
+    animation: slideIn 0.3s ease forwards;
+}
+
+.puzzle-card:nth-child(odd) {
+    animation-delay: 0.1s;
+}
+
+.puzzle-card:nth-child(even) {
+    animation-delay: 0.2s;
+}
+
+/* ================================================================
+   УТИЛИТЫ
+   ================================================================ */
+
+.text-muted {
+    color: var(--text-muted);
+}
+
+.text-accent {
+    color: var(--accent);
+}
+
+.text-easy {
+    color: var(--easy);
+}
+
+.text-medium {
+    color: var(--medium);
+}
+
+.text-hard {
+    color: var(--hard);
+}
+
+.bg-surface {
+    background: var(--surface);
+}
+
+.bg-surface2 {
+    background: var(--surface2);
+}
+
+.mt-1 { margin-top: 0.5rem; }
+.mt-2 { margin-top: 1rem; }
+.mt-3 { margin-top: 1.5rem; }
+.mt-4 { margin-top: 2rem; }
+
+.mb-1 { margin-bottom: 0.5rem; }
+.mb-2 { margin-bottom: 1rem; }
+.mb-3 { margin-bottom: 1.5rem; }
+.mb-4 { margin-bottom: 2rem; }
+
+.p-1 { padding: 0.5rem; }
+.p-2 { padding: 1rem; }
+.p-3 { padding: 1.5rem; }
+.p-4 { padding: 2rem; }

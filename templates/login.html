@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Пятнашки — Вход</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Unbounded:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-page">
+
+<div class="login-wrapper">
+    <div class="login-card">
+        <div class="login-logo">15</div>
+        <h1 class="login-title">ПЯТНАШКИ</h1>
+        <p class="login-subtitle">Введите имя чтобы начать</p>
+
+        {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('login') }}">
+            <div class="form-group">
+                <input
+                    type="text"
+                    name="username"
+                    class="form-input"
+                    placeholder="Ваше имя"
+                    autofocus
+                    required
+                    maxlength="50"
+                >
+            </div>
+            <button type="submit" class="btn btn-primary btn-full">Войти</button>
+        </form>
+
+        <p class="login-hint">Если вы новый игрок — аккаунт создастся автоматически</p>
+    </div>
+
+    <div class="login-tiles">
+        <div class="demo-tile">1</div>
+        <div class="demo-tile">2</div>
+        <div class="demo-tile">3</div>
+        <div class="demo-tile">4</div>
+        <div class="demo-tile">5</div>
+        <div class="demo-tile">6</div>
+        <div class="demo-tile">7</div>
+        <div class="demo-tile">8</div>
+        <div class="demo-tile empty"></div>
+    </div>
+</div>
+
+</body>
+</html>

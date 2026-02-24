@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Пятнашки — История{% endblock %}
+
+{% block content %}
+
+<section class="section">
+    <h2 class="section-title">История игр</h2>
+
+    {% if games %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Дата</th>
+                    <th>Поле</th>
+                    <th>Сложность</th>
+                    <th>Статус</th>
+                    <th>Ходов</th>
+                    <th>Время (мин)</th>
+                    <th>Место</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in games %}
+                <tr>
+                    <td>{{ g.start_time.strftime('%d.%m.%Y %H:%M') if g.start_time else '—' }}</td>
+                    <td>{{ g.grid_size }}×{{ g.grid_size }}</td>
+                    <td>
+                        <span class="tag tag-{{ g.difficulty | lower }}">{{ g.difficulty }}</span>
+                    </td>
+                    <td>
+                        <span class="status-badge status-{{ g.status }}">
+                            {% if g.status == 'solved' %}✓ Решено
+                            {% elif g.status == 'abandoned' %}✕ Сдался
+                            {% elif g.status == 'timeout' %}⏱ Время вышло
+                            {% elif g.status == 'exported' %}↗ Экспорт
+                            {% else %}{{ g.status }}{% endif %}
+                        </span>
+                    </td>
+                    <td>{{ g.steps_count }}</td>
+                    <td>{{ g.time_minutes or '—' }}</td>
+                    <td>{{ g.rank_in_category or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Вы ещё не сыграли ни одной игры.</p>
+    {% endif %}
+
+</section>
+
+{% endblock %}

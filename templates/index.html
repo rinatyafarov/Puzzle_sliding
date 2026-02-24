@@ -1,0 +1,395 @@
+{% extends "base.html" %}
+
+{% block title %}Пятнашки — Каталог{% endblock %}
+
+{% block content %}
+
+{% if active_game %}
+<div class="banner-active">
+    <div class="banner-content">
+        <span class="banner-icon">🎮</span>
+        <span>У вас есть незавершённая игра</span>
+        <span class="banner-size">{{ active_game.grid_size }}×{{ active_game.grid_size }}</span>
+        <span class="banner-difficulty tag-{{ active_game.difficulty | lower }}">{{ active_game.difficulty }}</span>
+    </div>
+    <div class="banner-actions">
+        <a href="{{ url_for('game') }}" class="btn btn-sm btn-primary">Продолжить</a>
+        <form method="POST" action="{{ url_for('game_over') }}" style="display:inline">
+            <button type="submit" class="btn btn-sm btn-outline">Завершить</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% if daily %}
+<section class="section">
+    <h2 class="section-title">
+        <span class="title-icon">⭐</span>
+        Игра дня
+    </h2>
+    <div class="daily-card">
+        <div class="daily-info">
+            <div class="daily-badge">DAILY CHALLENGE</div>
+            <div class="daily-meta">
+                <span class="tag tag-{{ daily.difficulty | lower }}">{{ daily.difficulty }}</span>
+                <span class="tag tag-size">{{ daily.grid_size }}×{{ daily.grid_size }}</span>
+                {% if daily.times_played %}
+                <span class="daily-played">👥 {{ daily.times_played }} игр</span>
+                {% endif %}
+            </div>
+            <p class="daily-seed">Seed: <code>{{ daily.seed }}</code></p>
+            {% if daily.top_score %}
+            <p class="daily-record">🏆 Лучший результат: {{ daily.top_score }} ходов</p>
+            {% endif %}
+        </div>
+        {% if not active_game %}
+        <a href="{{ url_for('start_game', puzzle_id=daily.puzzle_id) }}" class="btn btn-primary btn-large">
+            Играть сегодня
+        </a>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+
+<section class="section">
+    <div class="section-header">
+        <h2 class="section-title">
+            <span class="title-icon">📚</span>
+            Каталог головоломок
+        </h2>
+        <div class="section-stats">
+            <span class="stat-badge">Всего: {{ puzzles | length }}</span>
+        </div>
+    </div>
+
+    <!-- Фильтры -->
+    <div class="filters-container">
+        <div class="filter-group">
+            <div class="filter-label">Сложность:</div>
+            <div class="filter-bar">
+                <button class="filter-btn active" data-filter="all">Все</button>
+                <button class="filter-btn" data-filter="easy">Easy</button>
+                <button class="filter-btn" data-filter="medium">Medium</button>
+                <button class="filter-btn" data-filter="hard">Hard</button>
+            </div>
+        </div>
+
+        <div class="filter-group">
+            <div class="filter-label">Размер:</div>
+            <div class="size-filter-bar">
+                <button class="size-filter-btn active" data-size="all">Все</button>
+                <button class="size-filter-btn" data-size="3">3×3</button>
+                <button class="size-filter-btn" data-size="4">4×4</button>
+                <button class="size-filter-btn" data-size="5">5×5</button>
+                <button class="size-filter-btn" data-size="6">6×6</button>
+            </div>
+        </div>
+
+        <div class="filter-group">
+            <div class="filter-label">Сортировка:</div>
+            <select class="sort-select" id="sort-select">
+                <option value="default">По умолчанию</option>
+                <option value="size-asc">Размер (возр.)</option>
+                <option value="size-desc">Размер (убыв.)</option>
+                <option value="difficulty">По сложности</option>
+                <option value="popular">Популярные</option>
+                <option value="solved">Часто решаемые</option>
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="🔍 Поиск по seed..." class="search-input">
+            </div>
+        </div>
+    </div>
+
+    <!-- Статистика по фильтрам -->
+    <div class="filter-stats" id="filter-stats">
+        Показано <span id="shown-count">{{ puzzles | length }}</span> из {{ puzzles | length }}
+    </div>
+
+    <!-- Сетка пазлов -->
+    <div class="puzzles-grid" id="puzzles-grid">
+        {% for puzzle in puzzles %}
+        <div class="puzzle-card" 
+             data-difficulty="{{ puzzle.difficulty | lower }}"
+             data-size="{{ puzzle.grid_size }}"
+             data-popularity="{{ puzzle.times_played or 0 }}"
+             data-solved-rate="{{ (puzzle.times_solved / puzzle.times_played * 100) if puzzle.times_played and puzzle.times_played > 0 else 0 }}"
+             data-seed="{{ puzzle.seed | lower }}">
+            
+            <div class="puzzle-card-header">
+                <div class="puzzle-badges">
+                    <span class="tag tag-{{ puzzle.difficulty | lower }}">{{ puzzle.difficulty }}</span>
+                    <span class="tag tag-size">{{ puzzle.grid_size }}×{{ puzzle.grid_size }}</span>
+                </div>
+                {% if puzzle.is_daily %}
+                <span class="daily-indicator" title="Игра дня">⭐</span>
+                {% endif %}
+            </div>
+            
+            <div class="puzzle-seed" title="{{ puzzle.seed }}">{{ puzzle.seed }}</div>
+            
+            <div class="puzzle-preview">
+                <div class="mini-preview mini-{{ puzzle.grid_size }}">
+                    {% for i in range(puzzle.grid_size * puzzle.grid_size) %}
+                        {% if i == puzzle.grid_size * puzzle.grid_size - 1 %}
+                            <div class="preview-cell preview-empty"></div>
+                        {% else %}
+                            <div class="preview-cell"></div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="puzzle-stats">
+                <div class="stat-item" title="Сыграно раз">
+                    <span class="stat-icon">🎮</span>
+                    <span>{{ puzzle.times_played or 0 }}</span>
+                </div>
+                <div class="stat-item" title="Решено раз">
+                    <span class="stat-icon">✓</span>
+                    <span>{{ puzzle.times_solved or 0 }}</span>
+                </div>
+                <div class="stat-item" title="Процент решений">
+                    <span class="stat-icon">📊</span>
+                    <span>
+                        {% if puzzle.times_played and puzzle.times_played > 0 %}
+                            {{ (puzzle.times_solved / puzzle.times_played * 100) | round(1) }}%
+                        {% else %}
+                            0%
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+
+            <div class="progress-indicator">
+                <div class="progress-bar-small" style="width: {{ (puzzle.times_solved / puzzle.times_played * 100) if puzzle.times_played and puzzle.times_played > 0 else 0 }}%"></div>
+            </div>
+            
+            <div class="puzzle-card-footer">
+                {% if not active_game %}
+                <a href="{{ url_for('start_game', puzzle_id=puzzle.id) }}" class="btn btn-sm btn-full btn-play">
+                    ▶ Играть
+                </a>
+                {% else %}
+                <button class="btn btn-sm btn-full btn-disabled" disabled title="Сначала завершите текущую игру">
+                    ⏸ Завершите игру
+                </button>
+                {% endif %}
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">🧩</div>
+            <h3>Головоломок пока нет</h3>
+            <p>Добавьте их через SQL-пакет или дождитесь генерации</p>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Кнопка загрузки ещё (для будущего функционала) -->
+    {% if puzzles | length > 12 %}
+    <div class="load-more">
+        <button class="btn btn-outline" id="load-more">Загрузить ещё</button>
+    </div>
+    {% endif %}
+</section>
+
+<!-- Модальное окно с информацией о пазле -->
+<div class="modal" id="puzzle-info-modal" style="display:none">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h2>Информация о пазле</h2>
+            <button class="modal-close" onclick="this.closest('.modal').style.display='none'">✕</button>
+        </div>
+        <div class="modal-body" id="puzzle-info-content">
+            <!-- Заполняется динамически -->
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Фильтрация и сортировка
+    document.addEventListener('DOMContentLoaded', function() {
+        const filterBtns = document.querySelectorAll('.filter-btn');
+        const sizeFilterBtns = document.querySelectorAll('.size-filter-btn');
+        const sortSelect = document.getElementById('sort-select');
+        const searchInput = document.getElementById('search-input');
+        const puzzlesGrid = document.getElementById('puzzles-grid');
+        const shownCountSpan = document.getElementById('shown-count');
+        
+        let currentDifficulty = 'all';
+        let currentSize = 'all';
+        let currentSearch = '';
+        let currentSort = 'default';
+
+        function filterAndSortPuzzles() {
+            const cards = Array.from(document.querySelectorAll('.puzzle-card'));
+            let visibleCount = 0;
+
+            // Сначала фильтруем
+            cards.forEach(card => {
+                const difficulty = card.dataset.difficulty;
+                const size = card.dataset.size;
+                const seed = card.dataset.seed || '';
+                
+                const difficultyMatch = currentDifficulty === 'all' || difficulty === currentDifficulty;
+                const sizeMatch = currentSize === 'all' || size === currentSize;
+                const searchMatch = currentSearch === '' || seed.includes(currentSearch.toLowerCase());
+                
+                const visible = difficultyMatch && sizeMatch && searchMatch;
+                card.style.display = visible ? '' : 'none';
+                if (visible) visibleCount++;
+            });
+
+            // Потом сортируем видимые
+            if (currentSort !== 'default') {
+                const visibleCards = cards.filter(card => card.style.display !== 'none');
+                
+                visibleCards.sort((a, b) => {
+                    switch(currentSort) {
+                        case 'size-asc':
+                            return parseInt(a.dataset.size) - parseInt(b.dataset.size);
+                        case 'size-desc':
+                            return parseInt(b.dataset.size) - parseInt(a.dataset.size);
+                        case 'difficulty':
+                            const diffOrder = { 'easy': 1, 'medium': 2, 'hard': 3 };
+                            return (diffOrder[a.dataset.difficulty] || 0) - (diffOrder[b.dataset.difficulty] || 0);
+                        case 'popular':
+                            return (parseInt(b.dataset.popularity) || 0) - (parseInt(a.dataset.popularity) || 0);
+                        case 'solved':
+                            return (parseFloat(b.dataset.solvedRate) || 0) - (parseFloat(a.dataset.solvedRate) || 0);
+                        default:
+                            return 0;
+                    }
+                });
+
+                // Перемещаем отсортированные элементы в DOM
+                visibleCards.forEach(card => {
+                    puzzlesGrid.appendChild(card);
+                });
+            }
+
+            // Обновляем счетчик
+            shownCountSpan.textContent = visibleCount;
+            
+            // Показываем сообщение, если ничего не найдено
+            const emptyMessage = document.querySelector('.empty-search');
+            if (visibleCount === 0 && cards.length > 0) {
+                if (!emptyMessage) {
+                    const msg = document.createElement('div');
+                    msg.className = 'empty-search';
+                    msg.innerHTML = '<p>Ничего не найдено. Попробуйте изменить фильтры.</p>';
+                    puzzlesGrid.appendChild(msg);
+                }
+            } else if (emptyMessage) {
+                emptyMessage.remove();
+            }
+        }
+
+        // Обработчики фильтров сложности
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                filterBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentDifficulty = btn.dataset.filter;
+                filterAndSortPuzzles();
+            });
+        });
+
+        // Обработчики фильтров размера
+        sizeFilterBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                sizeFilterBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentSize = btn.dataset.size;
+                filterAndSortPuzzles();
+            });
+        });
+
+        // Обработчик сортировки
+        sortSelect.addEventListener('change', (e) => {
+            currentSort = e.target.value;
+            filterAndSortPuzzles();
+        });
+
+        // Обработчик поиска
+        searchInput.addEventListener('input', (e) => {
+            currentSearch = e.target.value.toLowerCase();
+            filterAndSortPuzzles();
+        });
+
+        // Инициализация мини-превью
+        document.querySelectorAll('.mini-preview').forEach(preview => {
+            const size = parseInt(preview.className.match(/mini-(\d+)/)[1]);
+            preview.style.gridTemplateColumns = `repeat(${size}, 1fr)`;
+        });
+
+        // Добавляем подсказки для карточек
+        document.querySelectorAll('.puzzle-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                // Не открываем модалку если клик по кнопке
+                if (e.target.closest('a') || e.target.closest('button')) return;
+                
+                // Здесь можно добавить открытие модалки с информацией
+                const seed = card.querySelector('.puzzle-seed').textContent;
+                const difficulty = card.dataset.difficulty;
+                const size = card.dataset.size;
+                const played = card.querySelector('.stat-item:nth-child(1) span:last-child').textContent;
+                const solved = card.querySelector('.stat-item:nth-child(2) span:last-child').textContent;
+                
+                showPuzzleInfo(seed, difficulty, size, played, solved);
+            });
+        });
+    });
+
+    // Функция показа информации о пазле
+    function showPuzzleInfo(seed, difficulty, size, played, solved) {
+        const modal = document.getElementById('puzzle-info-modal');
+        const content = document.getElementById('puzzle-info-content');
+        
+        content.innerHTML = `
+            <div class="puzzle-info">
+                <p><strong>Seed:</strong> ${seed}</p>
+                <p><strong>Сложность:</strong> <span class="tag tag-${difficulty}">${difficulty}</span></p>
+                <p><strong>Размер:</strong> ${size}×${size}</p>
+                <p><strong>Сыграно:</strong> ${played}</p>
+                <p><strong>Решено:</strong> ${solved}</p>
+            </div>
+        `;
+        
+        modal.style.display = 'flex';
+    }
+
+    // Закрытие модалки по клику вне
+    window.addEventListener('click', (e) => {
+        document.querySelectorAll('.modal').forEach(modal => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    });
+
+    // Анимация появления карточек
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+            }
+        });
+    });
+
+    document.querySelectorAll('.puzzle-card').forEach(card => {
+        card.style.opacity = '0';
+        card.style.transform = 'translateY(20px)';
+        card.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        observer.observe(card);
+    });
+</script>
+{% endblock %}

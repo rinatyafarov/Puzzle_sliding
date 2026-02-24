@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Пятнашки — Лидеры{% endblock %}
+
+{% block content %}
+
+<section class="section">
+    <h2 class="section-title">Таблица лидеров</h2>
+
+    {% if players %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Игрок</th>
+                    <th>Игр</th>
+                    <th>Решено</th>
+                    <th>Успех %</th>
+                    <th>Среднее время (мин)</th>
+                    <th>Лучший результат (ходов)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in players %}
+                <tr class="{% if p.username == username %}row-current{% endif %}">
+                    <td class="rank">
+                        {% if loop.index == 1 %}🥇
+                        {% elif loop.index == 2 %}🥈
+                        {% elif loop.index == 3 %}🥉
+                        {% else %}{{ loop.index }}{% endif %}
+                    </td>
+                    <td class="player-name">{{ p.username }}</td>
+                    <td>{{ p.total_games }}</td>
+                    <td>{{ p.solved_games }}</td>
+                    <td>
+                        <div class="mini-bar-wrap">
+                            <div class="mini-bar" style="width: {{ p.success_rate or 0 }}%"></div>
+                            <span>{{ p.success_rate or 0 }}%</span>
+                        </div>
+                    </td>
+                    <td>{{ p.avg_time_minutes or '—' }}</td>
+                    <td>{{ p.best_steps or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Пока никто не сыграл ни одной игры.</p>
+    {% endif %}
+
+</section>
+
+{% endblock %}
