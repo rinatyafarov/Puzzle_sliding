@@ -198,6 +198,39 @@ function updateStats(data) {
     }
 }
 
+// Новая функция для обновления статистики после UNDO/REDO
+function updateStatsAfterUndoRedo(data) {
+    const steps = document.getElementById('steps-count');
+    const misplaced = document.getElementById('misplaced-count');
+    const manhattan = document.getElementById('manhattan-distance');
+    const progress = document.getElementById('progress-pct');
+    const bar = document.getElementById('progress-bar');
+    const undoBtn = document.getElementById('btn-undo');
+    const redoBtn = document.getElementById('btn-redo');
+    
+    // Обновляем статистику
+    if (steps) steps.textContent = data.steps;
+    if (misplaced) misplaced.textContent = data.misplaced;
+    if (manhattan) manhattan.textContent = data.manhattan;
+    if (progress) progress.textContent = data.progress + '%';
+    if (bar) bar.style.width = data.progress + '%';
+    
+    // Обновляем состояние кнопок на основе данных от сервера
+    if (undoBtn) {
+        undoBtn.disabled = !data.undoAvailable;  // true если недоступна
+        console.log('Undo button disabled:', undoBtn.disabled);
+    }
+    if (redoBtn) {
+        redoBtn.disabled = !data.redoAvailable;  // true если недоступна
+        console.log('Redo button disabled:', redoBtn.disabled);
+    }
+    
+    // Обновляем мини-карту
+    if (data.board) {
+        updateMiniMap(data.board);
+    }
+}
+
 function updateMiniMap(board) {
     const miniBoard = document.querySelector('.mini-board');
     if (!miniBoard || !board) return;
@@ -256,7 +289,7 @@ function renderBoard(board) {
 
 function showWinModal(steps) {
     // Останавливаем таймер
-    stopTimer();
+    if (window.gameTimer) window.gameTimer.stop();
     
     const modal = document.getElementById('win-modal');
     const finalSteps = document.getElementById('final-steps');
@@ -264,15 +297,11 @@ function showWinModal(steps) {
     
     if (finalSteps) finalSteps.textContent = steps;
     
-    // Показываем итоговое время
-    const minutes = Math.floor(timerSeconds / 60);
-    const seconds = timerSeconds % 60;
-    if (finalTime) finalTime.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    
-    // Удаляем сохранённые данные таймера
-    if (typeof SESSION_ID !== 'undefined') {
-        sessionStorage.removeItem('puzzle_timer_' + SESSION_ID);
-    }
+    // Показываем итоговое время из серверного таймера
+    const elapsed = window.gameTimer ? window.gameTimer.getElapsed() : 0;
+    const minutes = Math.floor(elapsed / 60);
+    const seconds = elapsed % 60;
+    if (finalTime) finalTime.textContent = `${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
     
     if (modal) modal.style.display = 'flex';
 }
@@ -294,7 +323,13 @@ function showHintModal(hintData) {
     if (modal) modal.style.display = 'flex';
 }
 
+// ================================================================
+// ХОДЫ
+// ================================================================
+
 async function moveTile(tile) {
+    console.log("Move tile:", tile);
+    
     // Защита от двойного клика
     const now = Date.now();
     if (now - lastMoveTime < 200) return;
@@ -313,6 +348,7 @@ async function moveTile(tile) {
         });
 
         const data = await res.json();
+        console.log("Move response:", data);
 
         if (data.error) {
             showMessage(data.error, 'error');
@@ -324,6 +360,16 @@ async function moveTile(tile) {
             return;
         }
 
+        if (data.status === 'timeout') {
+            if (window.gameTimer) window.gameTimer.stop();
+            const stepsEl = document.getElementById('timeout-steps');
+            const stepsCount = document.getElementById('steps-count');
+            if (stepsEl && stepsCount) stepsEl.textContent = stepsCount.textContent;
+            const modal = document.getElementById('timeout-modal');
+            if (modal) modal.style.display = 'flex';
+            return;
+        }
+
         if (data.status === 'solved') {
             if (data.board) renderBoard(data.board);
             updateStats({...data, redoAvailable: false});
@@ -332,7 +378,16 @@ async function moveTile(tile) {
         }
 
         if (data.board) renderBoard(data.board);
+        
+        // Обновляем статистику
         updateStats({...data, redoAvailable: true});
+        
+        // После хода UNDO становится доступен
+        const undoBtn = document.getElementById('btn-undo');
+        if (undoBtn) {
+            undoBtn.disabled = false;
+            console.log("Undo button enabled after move");
+        }
 
     } catch (e) {
         console.error('Ошибка при ходе:', e);
@@ -340,19 +395,34 @@ async function moveTile(tile) {
     }
 }
 
+// ================================================================
+// UNDO / REDO - ИСПРАВЛЕННЫЕ ФУНКЦИИ
+// ================================================================
+
 async function undoMove() {
+    console.log("Undo clicked");
+    
     try {
-        const res = await fetch('/game/undo', { method: 'POST' });
+        const res = await fetch('/game/undo', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
         const data = await res.json();
+        console.log("Undo response:", data);
         
         if (data.error) { 
             showMessage(data.error, 'error'); 
             return; 
         }
         
-        if (data.board) renderBoard(data.board);
-        updateStats({...data, redoAvailable: true});
-        showMessage('Ход отменён');
+        if (data.board) {
+            renderBoard(data.board);
+            // Обновляем статистику с использованием специальной функции
+            updateStatsAfterUndoRedo(data);
+        }
+        
+        showMessage('Ход отменён', 'success');
         
     } catch (e) {
         console.error('Ошибка при отмене:', e);
@@ -361,24 +431,39 @@ async function undoMove() {
 }
 
 async function redoMove() {
+    console.log("Redo clicked");
+    
     try {
-        const res = await fetch('/game/redo', { method: 'POST' });
+        const res = await fetch('/game/redo', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
         const data = await res.json();
+        console.log("Redo response:", data);
         
         if (data.error) { 
             showMessage(data.error, 'error'); 
             return; 
         }
         
-        if (data.board) renderBoard(data.board);
-        updateStats({...data, redoAvailable: false});
-        showMessage('Ход возвращён');
+        if (data.board) {
+            renderBoard(data.board);
+            // Обновляем статистику с использованием специальной функции
+            updateStatsAfterUndoRedo(data);
+        }
+        
+        showMessage('Ход возвращён', 'success');
         
     } catch (e) {
         console.error('Ошибка при возврате:', e);
         showMessage('Ошибка соединения', 'error');
     }
 }
+
+// ================================================================
+// ПОДСКАЗКА
+// ================================================================
 
 async function getHint() {
     try {
@@ -444,13 +529,26 @@ document.addEventListener('keydown', (e) => {
 
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', () => {
+    console.log("Game page loaded, initializing buttons...");
+    
     const btnUndo = document.getElementById('btn-undo');
     const btnRedo = document.getElementById('btn-redo');
     const btnHint = document.getElementById('btn-hint');
     
-    if (btnUndo) btnUndo.addEventListener('click', undoMove);
-    if (btnRedo) btnRedo.addEventListener('click', redoMove);
-    if (btnHint) btnHint.addEventListener('click', getHint);
+    console.log("Undo button:", btnUndo);
+    console.log("Redo button:", btnRedo);
+    
+    if (btnUndo) {
+        btnUndo.addEventListener('click', undoMove);
+        console.log("Undo handler attached");
+    }
+    if (btnRedo) {
+        btnRedo.addEventListener('click', redoMove);
+        console.log("Redo handler attached");
+    }
+    if (btnHint) {
+        btnHint.addEventListener('click', getHint);
+    }
     
     // Инициализируем таймер
     initGameTimer();
@@ -477,4 +575,16 @@ document.addEventListener('DOMContentLoaded', () => {
             sessionStorage.setItem('puzzle_timer_' + SESSION_ID, timerSeconds.toString());
         }
     });
+    
+    // Проверяем начальное состояние кнопок
+    const stepsCount = document.getElementById('steps-count');
+    if (stepsCount && btnUndo) {
+        const currentSteps = parseInt(stepsCount.textContent);
+        btnUndo.disabled = (currentSteps === 0);
+        console.log("Initial undo button state:", btnUndo.disabled ? "disabled" : "enabled");
+    }
+    if (btnRedo) {
+        btnRedo.disabled = true;  // Изначально REDO недоступен
+        console.log("Initial redo button state: disabled");
+    }
 });

@@ -1,7 +1,8 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 import db
 import json
-from datetime import datetime, timedelta
+import traceback
+import time
 
 app = Flask(__name__)
 app.secret_key = "sliding_puzzle_secret_key"
@@ -17,36 +18,90 @@ def get_current_user_id():
 
 def get_active_session_id():
     """Возвращает ID активной игровой сессии из Flask-сессии."""
-    return session.get("game_session_id")
+    try:
+        return session.get("game_session_id")
+    except:
+        return None
+
+
+def ensure_db_connection():
+    """Проверяет и восстанавливает соединение с БД."""
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            # Простой запрос для проверки соединения
+            result = db.fetch_one("SELECT 1 FROM DUAL")
+            if result:
+                return True
+        except Exception as e:
+            print(f"Database connection lost (attempt {attempt + 1}/{max_attempts}): {e}")
+            if attempt < max_attempts - 1:
+                time.sleep(0.5)
+            else:
+                return False
+    return False
 
 
 def get_active_attempt(session_id):
     """Возвращает активную попытку по session_id."""
-    return db.fetch_one(
-        """SELECT GA.ID, GA.CURRENT_STATE, GA.UNDO_POINTER,
-                  GA.CURRENT_MISPLACED_TILES, GA.CURRENT_MANHATTAN_DISTANCE,
-                  GA.INITIAL_MANHATTAN_DISTANCE,
-                  PS.GRID_SIZE, DL.NAME AS DIFFICULTY,
-                  PZ.TARGET_STATE, PZ.ID AS PUZZLE_ID,
-                  GA.STARTED_AT, PS.DEFAULT_TIME_LIMIT
-           FROM GAME_ATTEMPTS GA
-           JOIN GAME_STATUSES GST ON GA.STATUS_ID = GST.ID
-           JOIN PUZZLES PZ ON GA.PUZZLE_ID = PZ.ID
-           JOIN PUZZLE_SIZES PS ON PZ.PUZZLE_SIZE_ID = PS.ID
-           JOIN DIFFICULTY_LEVELS DL ON PZ.DIFFICULTY_ID = DL.ID
-           WHERE GA.SESSION_ID = :1 AND GST.NAME = 'active' AND ROWNUM = 1""",
-        [session_id]
-    )
+    if not session_id:
+        return None
+
+    if not ensure_db_connection():
+        print("Cannot connect to database in get_active_attempt")
+        return None
+
+    try:
+        return db.fetch_one(
+            """SELECT GA.ID, GA.CURRENT_STATE, GA.UNDO_POINTER,
+                      GA.CURRENT_MISPLACED_TILES, GA.CURRENT_MANHATTAN_DISTANCE,
+                      GA.INITIAL_MANHATTAN_DISTANCE,
+                      PS.GRID_SIZE, DL.NAME AS DIFFICULTY,
+                      PZ.TARGET_STATE, PZ.ID AS PUZZLE_ID,
+                      GA.STARTED_AT
+               FROM GAME_ATTEMPTS GA
+               JOIN GAME_STATUSES GST ON GA.STATUS_ID = GST.ID
+               JOIN PUZZLES PZ ON GA.PUZZLE_ID = PZ.ID
+               JOIN PUZZLE_SIZES PS ON PZ.PUZZLE_SIZE_ID = PS.ID
+               JOIN DIFFICULTY_LEVELS DL ON PZ.DIFFICULTY_ID = DL.ID
+               WHERE GA.SESSION_ID = :1 AND GST.NAME = 'active' AND ROWNUM = 1""",
+            [session_id]
+        )
+    except Exception as e:
+        print(f"Error in get_active_attempt: {e}")
+        return None
 
 
 def read_clob(value):
-    """Читает CLOB или строку и возвращает str."""
+    """Читает CLOB или строку и возвращает str. При ошибке возвращает пустую строку."""
     if value is None:
         return ""
-    # oracledb возвращает CLOB как объект с методом read()
+
+    # Если это уже строка
+    if isinstance(value, str):
+        return value
+
+    # Если это CLOB объект
     if hasattr(value, "read"):
-        return value.read()
-    return str(value)
+        try:
+            # Пробуем прочитать CLOB
+            result = value.read()
+            # Пробуем закрыть CLOB
+            try:
+                value.close()
+            except:
+                pass
+            return result if result else ""
+        except Exception as e:
+            print(f"Error reading CLOB: {e}")
+            # Вместо повторных попыток, сразу возвращаем пустую строку
+            return ""
+
+    # В остальных случаях просто преобразуем в строку
+    try:
+        return str(value)
+    except:
+        return ""
 
 
 def parse_board(state_str, grid_size):
@@ -56,6 +111,10 @@ def parse_board(state_str, grid_size):
 
     if not s:
         return [], []
+
+    # Убираем лишние кавычки если они есть
+    if s.startswith('"') and s.endswith('"'):
+        s = s[1:-1]
 
     try:
         data = json.loads(s)
@@ -69,22 +128,12 @@ def parse_board(state_str, grid_size):
         flat = []
         for row in data:
             flat.extend(row)
-        # Проверяем, что размер соответствует grid_size
-        expected_length = grid_size * grid_size
-        if len(flat) != expected_length:
-            print(f"Warning: Board size mismatch. Expected {expected_length}, got {len(flat)}")
-            # Пытаемся обрезать или дополнить
-            if len(flat) > expected_length:
-                flat = flat[:expected_length]
-            elif len(flat) < expected_length:
-                flat.extend([0] * (expected_length - len(flat)))
         return data, flat
     else:
         # Это плоский список
         flat = data
         expected_length = grid_size * grid_size
         if len(flat) != expected_length:
-            print(f"Warning: Board size mismatch. Expected {expected_length}, got {len(flat)}")
             if len(flat) > expected_length:
                 flat = flat[:expected_length]
             elif len(flat) < expected_length:
@@ -107,6 +156,13 @@ def parse_board_csv(csv_str, grid_size):
         flat = [int(x.strip()) for x in csv_str.split(",")]
     except ValueError:
         return [], []
+
+    expected_length = grid_size * grid_size
+    if len(flat) != expected_length:
+        if len(flat) > expected_length:
+            flat = flat[:expected_length]
+        elif len(flat) < expected_length:
+            flat.extend([0] * (expected_length - len(flat)))
 
     board = []
     for r in range(grid_size):
@@ -133,16 +189,14 @@ def compute_metrics(flat, target_flat, grid_size):
 
     # Убеждаемся, что target_flat - плоский список
     if target_flat and len(target_flat) > 0 and isinstance(target_flat[0], list):
-        # Преобразуем двумерный в плоский
         new_target = []
         for row in target_flat:
             new_target.extend(row)
         target_flat = new_target
 
-    # Создаем словарь позиций для быстрого поиска
     target_positions = {}
     for idx, val in enumerate(target_flat):
-        if val != 0:  # Не учитываем пустую клетку
+        if val != 0:
             target_positions[val] = idx
 
     for i, val in enumerate(flat):
@@ -161,9 +215,7 @@ def compute_metrics(flat, target_flat, grid_size):
             tgt_row, tgt_col = divmod(target_pos, n)
             manhattan += abs(cur_row - tgt_row) + abs(cur_col - tgt_col)
         else:
-            # Если значение не найдено в target_flat, считаем его неправильным
             misplaced += 1
-            # Добавляем максимальное расстояние
             manhattan += 2 * n
 
     return misplaced, manhattan, correct
@@ -175,43 +227,15 @@ def progress_pct(init_manhattan, cur_manhattan):
     return round((init_manhattan - cur_manhattan) / init_manhattan * 100, 1)
 
 
-def check_timeout(attempt_id):
-    """Проверяет, не истекло ли время игры."""
-    result = db.fetch_one(
-        """SELECT CASE 
-                    WHEN (SYSTIMESTAMP - GA.STARTED_AT) > PS.DEFAULT_TIME_LIMIT 
-                    THEN 1 ELSE 0 END AS TIME_EXPIRED,
-                    EXTRACT(HOUR FROM (SYSTIMESTAMP - GA.STARTED_AT)) * 60 +
-                    EXTRACT(MINUTE FROM (SYSTIMESTAMP - GA.STARTED_AT)) AS ELAPSED_MINUTES,
-                    EXTRACT(HOUR FROM PS.DEFAULT_TIME_LIMIT) * 60 +
-                    EXTRACT(MINUTE FROM PS.DEFAULT_TIME_LIMIT) AS TIME_LIMIT_MINUTES
-           FROM GAME_ATTEMPTS GA
-           JOIN PUZZLES PZ ON GA.PUZZLE_ID = PZ.ID
-           JOIN PUZZLE_SIZES PS ON PZ.PUZZLE_SIZE_ID = PS.ID
-           WHERE GA.ID = :1""",
-        [attempt_id]
-    )
-    return result
+def check_win_condition(flat, target_flat):
+    """Проверяет, решена ли головоломка."""
+    if len(flat) != len(target_flat):
+        return False
 
-
-def handle_timeout(session_id, attempt_id):
-    """Обрабатывает истечение времени игры."""
-    status_timeout = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='timeout'")
-    if not status_timeout:
-        db.execute_query("INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'timeout')")
-        status_timeout = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='timeout'")
-
-    if status_timeout:
-        db.execute_query(
-            "UPDATE GAME_ATTEMPTS SET STATUS_ID=:1, FINISHED_AT=SYSTIMESTAMP WHERE ID=:2",
-            [status_timeout["id"], attempt_id]
-        )
-        db.execute_query(
-            "UPDATE GAME_SESSIONS SET STATUS_ID=:1, END_TIME=SYSDATE WHERE ID=:2",
-            [status_timeout["id"], session_id]
-        )
-        return True
-    return False
+    for i in range(len(flat)):
+        if flat[i] != target_flat[i]:
+            return False
+    return True
 
 
 # ================================================================
@@ -316,14 +340,12 @@ def start_game(puzzle_id):
     if not get_current_user_id():
         return redirect(url_for("login"))
 
-    # Не запускать если уже есть активная
     gsid = get_active_session_id()
     if gsid and get_active_attempt(gsid):
         return redirect(url_for("game"))
 
     user_id = get_current_user_id()
 
-    # Получить данные пазла
     puzzle = db.fetch_one(
         """SELECT PZ.ID, PS.GRID_SIZE, DL.SHUFFLE_MOVES,
                   PZ.INITIAL_STATE, PZ.TARGET_STATE, PS.DEFAULT_TIME_LIMIT
@@ -338,18 +360,16 @@ def start_game(puzzle_id):
 
     grid_size = puzzle["grid_size"]
 
-    # Читаем JSON-строки из CLOB
     init_json = read_clob(puzzle["initial_state"])
     tgt_json = read_clob(puzzle["target_state"])
 
-    # Преобразуем JSON в списки для вычислений
     try:
         init_data = json.loads(init_json)
         tgt_data = json.loads(tgt_json)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error: {e}")
         return redirect(url_for("index"))
 
-    # Преобразуем в плоские списки для вычислений
     if init_data and len(init_data) > 0 and isinstance(init_data[0], list):
         init_flat = []
         for row in init_data:
@@ -364,14 +384,8 @@ def start_game(puzzle_id):
     else:
         tgt_flat = tgt_data
 
-    # Нормализуем состояние: всегда храним как плоский JSON список
-    init_json = json.dumps(init_flat)
-    tgt_json = json.dumps(tgt_flat)
-
-    # Вычисляем метрики
     misplaced, manhattan, correct = compute_metrics(init_flat, tgt_flat, grid_size)
 
-    # Получить ID статуса active
     status_active_row = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='active'")
     if not status_active_row:
         db.execute_query("INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'active')")
@@ -384,7 +398,6 @@ def start_game(puzzle_id):
         action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     action_move = action_move_row["id"]
 
-    # Создать сессию
     timestamp_row = db.fetch_one("SELECT TO_CHAR(SYSDATE, 'YYYYMMDDHH24MISS') AS T FROM DUAL")
     token = f"{user_id}_{puzzle_id}_{timestamp_row['t']}"
 
@@ -400,12 +413,11 @@ def start_game(puzzle_id):
     gs = db.fetch_one("SELECT ID FROM GAME_SESSIONS WHERE SESSION_TOKEN=:1", [token])
     if not gs:
         gs = db.fetch_one(
-            "SELECT ID FROM GAME_SESSIONS WHERE USER_ID = :1 AND ROWNUM = 1 ORDER BY ID DESC",
-            [user_id]
+            "SELECT ID FROM GAME_SESSIONS WHERE USER_ID = :1 AND SESSION_TOKEN LIKE :2 ORDER BY ID DESC",
+            [user_id, f"{user_id}_{puzzle_id}%"]
         )
     gs_id = gs["id"]
 
-    # Создать попытку
     db.execute_query(
         """INSERT INTO GAME_ATTEMPTS
                (ID, SESSION_ID, USER_ID, PUZZLE_ID, GAME_MODE, CURRENT_STATE,
@@ -419,9 +431,13 @@ def start_game(puzzle_id):
     )
 
     ga = db.fetch_one("SELECT ID FROM GAME_ATTEMPTS WHERE SESSION_ID=:1 AND ROWNUM=1", [gs_id])
+    if not ga:
+        ga = db.fetch_one(
+            "SELECT ID FROM GAME_ATTEMPTS WHERE SESSION_ID = :1 ORDER BY ID DESC",
+            [gs_id]
+        )
     ga_id = ga["id"]
 
-    # Записать шаг 0 (начальное состояние)
     db.execute_query(
         """INSERT INTO GAME_STEPS
                (ID, SESSION_ID, ATTEMPT_ID, ACTION_ID, STATE_AFTER,
@@ -431,7 +447,6 @@ def start_game(puzzle_id):
         [gs_id, ga_id, action_move, init_json]
     )
 
-    # Обновить счётчик игр пользователя
     db.execute_query(
         "UPDATE USERS SET GAMES_COUNT = GAMES_COUNT + 1, "
         "FIRST_GAME_DATE = NVL(FIRST_GAME_DATE, SYSDATE) WHERE ID = :1",
@@ -466,15 +481,51 @@ def game():
     misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
     pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
 
-    # Получаем лимит времени в минутах для передачи в шаблон
-    time_limit = db.fetch_one(
-        "SELECT EXTRACT(HOUR FROM DEFAULT_TIME_LIMIT) * 60 + EXTRACT(MINUTE FROM DEFAULT_TIME_LIMIT) AS TIME_LIMIT_MINUTES FROM PUZZLE_SIZES WHERE GRID_SIZE = :1",
+    # Получаем лимит времени из таблицы PUZZLE_SIZES
+    time_limit_row = db.fetch_one(
+        "SELECT DEFAULT_TIME_LIMIT FROM PUZZLE_SIZES WHERE GRID_SIZE = :1",
         [grid_size]
     )
-    time_limit_minutes = time_limit["time_limit_minutes"] if time_limit else 15
+
+    # Преобразуем INTERVAL в секунды
+    time_limit_seconds = 0
+    if time_limit_row and time_limit_row["default_time_limit"]:
+        # Парсим INTERVAL DAY TO SECOND
+        time_limit_str = str(time_limit_row["default_time_limit"])
+        # Пример формата: "+08 00:00:00" или "8 0:0:0"
+        import re
+        match = re.search(r'(\d+)\s+(\d+):(\d+):(\d+)', time_limit_str)
+        if match:
+            days = int(match.group(1))
+            hours = int(match.group(2))
+            minutes = int(match.group(3))
+            seconds = int(match.group(4))
+            time_limit_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds
+        else:
+            # Если не удалось распарсить, ставим значение по умолчанию
+            time_limit_seconds = grid_size * 60  # примерно N минут
+
+    # Получаем время начала игры
+    start_time_row = db.fetch_one(
+        "SELECT STARTED_AT FROM GAME_ATTEMPTS WHERE ID = :1",
+        [attempt["id"]]
+    )
+
+    elapsed_seconds = 0
+    if start_time_row and start_time_row["started_at"]:
+        # Вычисляем прошедшее время в секундах
+        from datetime import datetime
+        start_time = start_time_row["started_at"]
+        if hasattr(start_time, 'timestamp'):
+            # Если это datetime объект
+            elapsed_seconds = int((datetime.now() - start_time).total_seconds())
+        else:
+            # Если это строка или другой формат
+            elapsed_seconds = 0
 
     active = {
         "session_id": gsid,
+        "id": attempt["id"],  # Добавляем ID попытки
         "grid_size": grid_size,
         "difficulty": attempt["difficulty"],
         "current_step": attempt["undo_pointer"],
@@ -482,7 +533,8 @@ def game():
         "manhattan_distance": manhattan,
         "progress_pct": pct,
         "initial_manhattan": attempt["initial_manhattan_distance"],
-        "time_limit_minutes": time_limit_minutes
+        "time_limit_seconds": time_limit_seconds,  # Добавляем лимит времени в секундах
+        "elapsed_seconds": elapsed_seconds,  # Добавляем прошедшее время
     }
 
     return render_template(
@@ -492,39 +544,8 @@ def game():
         username=session.get("username")
     )
 
-
 # ================================================================
-# ИГРА -- ПРОВЕРКА ТАЙМАУТА
-# ================================================================
-
-@app.route("/game/check-timeout", methods=["POST"])
-def check_timeout_endpoint():
-    """Проверяет, не истекло ли время игры."""
-    if not get_current_user_id():
-        return jsonify({"error": "Не авторизован"}), 401
-
-    gsid = get_active_session_id()
-    if not gsid:
-        return jsonify({"error": "Нет активной игровой сессии"}), 400
-
-    attempt = get_active_attempt(gsid)
-    if not attempt:
-        return jsonify({"error": "Нет активной попытки"}), 400
-
-    # Проверяем время
-    timeout_check = check_timeout(attempt["id"])
-
-    if timeout_check and timeout_check.get("time_expired") == 1:
-        # Завершаем игру по таймауту
-        if handle_timeout(gsid, attempt["id"]):
-            session.pop("game_session_id", None)
-            return jsonify({"timeout": True, "message": "Время вышло"})
-
-    return jsonify({"timeout": False})
-
-
-# ================================================================
-# ИГРА -- ХОД
+# ИГРА -- ХОД (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ================================================================
 
 @app.route("/game/move", methods=["POST"])
@@ -540,28 +561,21 @@ def make_move():
     if not gsid:
         return jsonify({"error": "Нет активной игровой сессии"}), 400
 
+    if not ensure_db_connection():
+        return jsonify({"error": "Ошибка подключения к БД"}), 500
+
     attempt = get_active_attempt(gsid)
     if not attempt:
         return jsonify({"error": "Нет активной попытки"}), 400
 
-    # Проверка времени перед ходом
-    timeout_check = check_timeout(attempt["id"])
-    if timeout_check and timeout_check.get("time_expired") == 1:
-        # Завершаем игру по таймауту
-        if handle_timeout(gsid, attempt["id"]):
-            session.pop("game_session_id", None)
-            return jsonify({"error": "Время вышло"}), 400
-
     grid_size = attempt["grid_size"]
 
-    # Читаем текущее состояние как JSON
     current_state_json = read_clob(attempt["current_state"])
     target_state_json = read_clob(attempt["target_state"])
 
     board, flat = parse_board(current_state_json, grid_size)
     _, tgt_flat = parse_board(target_state_json, grid_size)
 
-    # Найти позиции плитки и пустой клетки
     try:
         tile_value = int(tile)
         tile_pos = flat.index(tile_value)
@@ -569,7 +583,6 @@ def make_move():
     except ValueError:
         return jsonify({"error": f"Плитка {tile} не найдена"}), 400
 
-    # Проверить легальность хода
     diff = tile_pos - empty_pos
     if diff not in (1, -1, grid_size, -grid_size):
         return jsonify({"error": "Недопустимый ход"}), 400
@@ -577,60 +590,67 @@ def make_move():
         if tile_pos // grid_size != empty_pos // grid_size:
             return jsonify({"error": "Недопустимый ход"}), 400
 
-    # Выполнить ход
     flat[empty_pos], flat[tile_pos] = flat[tile_pos], flat[empty_pos]
 
-    # Сохраняем состояние как JSON
     new_state_json = json.dumps(flat)
 
-    # Вычисляем метрики
     misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
     next_idx = attempt["undo_pointer"] + 1
 
-    # Получаем ID действия 'move' с проверкой
     action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     if not action_move_row:
         db.execute_query("INSERT INTO ACTION_TYPES (ID, NAME) VALUES (SEQ_ACTION_TYPES.NEXTVAL, 'move')")
         action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     action_move = action_move_row["id"]
 
-    # Инвалидировать redo-ветку
-    db.execute_query(
-        "UPDATE GAME_STEPS SET IS_ACTUAL=0 WHERE ATTEMPT_ID=:1 AND STEP_INDEX > :2",
-        [attempt["id"], attempt["undo_pointer"]]
+    # Проверяем, существует ли уже шаг с таким индексом
+    existing_step = db.fetch_one(
+        "SELECT ID FROM GAME_STEPS WHERE ATTEMPT_ID = :1 AND STEP_INDEX = :2",
+        [attempt["id"], next_idx]
     )
 
-    # Записать шаг
-    db.execute_query(
-        """INSERT INTO GAME_STEPS
+    if existing_step:
+        # Если шаг существует, просто обновляем его
+        db.execute_query(
+            """UPDATE GAME_STEPS 
+               SET STATE_AFTER = :1, IS_ACTUAL = 1, STEP_TIME = SYSDATE
+               WHERE ATTEMPT_ID = :2 AND STEP_INDEX = :3""",
+            [new_state_json, attempt["id"], next_idx]
+        )
+    else:
+        # Если шага нет, вставляем новый
+        db.execute_query(
+            """INSERT INTO GAME_STEPS
                (ID, SESSION_ID, ATTEMPT_ID, ACTION_ID, TILE_VALUE,
                 STATE_AFTER, IS_ACTUAL, IS_IMPORT, IS_MARK, STEP_INDEX, STEP_TIME)
-           VALUES (SEQ_GAME_STEPS.NEXTVAL, :1, :2, :3, :4,
-                   :5, 1, 0, 0, :6, SYSDATE)""",
-        [gsid, attempt["id"], action_move, tile_value, new_state_json, next_idx]
+               VALUES (SEQ_GAME_STEPS.NEXTVAL, :1, :2, :3, :4,
+                       :5, 1, 0, 0, :6, SYSDATE)""",
+            [gsid, attempt["id"], action_move, tile_value, new_state_json, next_idx]
+        )
+
+    # Инвалидируем все шаги после текущего индекса
+    db.execute_query(
+        "UPDATE GAME_STEPS SET IS_ACTUAL = 0 WHERE ATTEMPT_ID = :1 AND STEP_INDEX > :2",
+        [attempt["id"], next_idx]
     )
 
-    # Обновить попытку
     db.execute_query(
         """UPDATE GAME_ATTEMPTS
-           SET CURRENT_STATE=:1, CURRENT_MISPLACED_TILES=:2,
-               CURRENT_MANHATTAN_DISTANCE=:3, UNDO_POINTER=:4
-           WHERE ID=:5""",
+           SET CURRENT_STATE = :1, CURRENT_MISPLACED_TILES = :2,
+               CURRENT_MANHATTAN_DISTANCE = :3, UNDO_POINTER = :4
+           WHERE ID = :5""",
         [new_state_json, misplaced, manhattan, next_idx, attempt["id"]]
     )
 
-    # Обновить сессию
     db.execute_query(
-        "UPDATE GAME_SESSIONS SET STEPS_COUNT=STEPS_COUNT+1, LAST_ACTIVITY_AT=SYSTIMESTAMP WHERE ID=:1",
+        "UPDATE GAME_SESSIONS SET STEPS_COUNT = STEPS_COUNT + 1, LAST_ACTIVITY_AT = SYSTIMESTAMP WHERE ID = :1",
         [gsid]
     )
 
-    # Перестраиваем доску для ответа
     board = [flat[r * grid_size:(r + 1) * grid_size] for r in range(grid_size)]
     pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
 
-    # Проверить победу
-    if flat == tgt_flat:
+    if check_win_condition(flat, tgt_flat):
         status_solved_row = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='solved'")
         if not status_solved_row:
             db.execute_query("INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'solved')")
@@ -638,17 +658,18 @@ def make_move():
         status_solved = status_solved_row["id"]
 
         db.execute_query(
-            "UPDATE GAME_ATTEMPTS SET STATUS_ID=:1, FINISHED_AT=SYSTIMESTAMP WHERE ID=:2",
+            "UPDATE GAME_ATTEMPTS SET STATUS_ID = :1, FINISHED_AT = SYSTIMESTAMP WHERE ID = :2",
             [status_solved, attempt["id"]]
         )
         db.execute_query(
-            "UPDATE GAME_SESSIONS SET STATUS_ID=:1, END_TIME=SYSDATE WHERE ID=:2",
+            "UPDATE GAME_SESSIONS SET STATUS_ID = :1, END_TIME = SYSDATE WHERE ID = :2",
             [status_solved, gsid]
         )
         session.pop("game_session_id", None)
+
         return jsonify({
             "status": "solved",
-            "board": board,
+            "board": [flat[r * grid_size:(r + 1) * grid_size] for r in range(grid_size)],
             "steps": next_idx,
             "progress": 100,
             "misplaced": 0,
@@ -661,16 +682,19 @@ def make_move():
         "steps": next_idx,
         "misplaced": misplaced,
         "manhattan": manhattan,
-        "progress": pct
+        "progress": pct,
+        "undoAvailable": True,
+        "redoAvailable": False
     })
 
 
 # ================================================================
-# ИГРА -- UNDO
+# ИГРА -- UNDO (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ================================================================
 
 @app.route("/game/undo", methods=["POST"])
 def undo_move():
+    print("=== UNDO CALLED ===")
     if not get_current_user_id():
         return jsonify({"error": "Не авторизован"}), 401
 
@@ -678,65 +702,120 @@ def undo_move():
     if not gsid:
         return jsonify({"error": "Нет активной игровой сессии"}), 400
 
-    attempt = get_active_attempt(gsid)
-    if not attempt or attempt["undo_pointer"] <= 0:
-        return jsonify({"error": "Нет ходов для отмены"}), 400
+    # Принудительно проверяем соединение
+    if not ensure_db_connection():
+        return jsonify({"error": "Потеряно соединение с БД"}), 500
 
-    # Проверка времени перед отменой
-    timeout_check = check_timeout(attempt["id"])
-    if timeout_check and timeout_check.get("time_expired") == 1:
-        if handle_timeout(gsid, attempt["id"]):
-            session.pop("game_session_id", None)
-            return jsonify({"error": "Время вышло"}), 400
+    try:
+        # ПОЛУЧАЕМ ВСЕ ДАННЫЕ ОДНИМ ЗАПРОСОМ (более надежно)
+        game_data = db.fetch_one("""
+            SELECT 
+                GA.ID as attempt_id,
+                GA.UNDO_POINTER,
+                GA.INITIAL_MANHATTAN_DISTANCE,
+                PS.GRID_SIZE,
+                PZ.TARGET_STATE
+            FROM GAME_ATTEMPTS GA
+            JOIN GAME_STATUSES GST ON GA.STATUS_ID = GST.ID
+            JOIN PUZZLES PZ ON GA.PUZZLE_ID = PZ.ID
+            JOIN PUZZLE_SIZES PS ON PZ.PUZZLE_SIZE_ID = PS.ID
+            WHERE GA.SESSION_ID = :1 AND GST.NAME = 'active' AND ROWNUM = 1
+        """, [gsid])
 
-    grid_size = attempt["grid_size"]
+        if not game_data:
+            return jsonify({"error": "Активная игра не найдена"}), 400
 
-    # Получаем целевое состояние
-    target_state_json = read_clob(attempt["target_state"])
-    _, tgt_flat = parse_board(target_state_json, grid_size)
+        attempt_id = game_data["attempt_id"]
+        current_pointer = game_data["undo_pointer"]
+        init_manhattan = game_data["initial_manhattan_distance"]
+        grid_size = game_data["grid_size"]
+        target_state = game_data["target_state"]
 
-    prev_idx = attempt["undo_pointer"] - 1
+        print(f"Current undo_pointer: {current_pointer}")
 
-    prev_step = db.fetch_one(
-        "SELECT STATE_AFTER FROM GAME_STEPS WHERE ATTEMPT_ID=:1 AND STEP_INDEX=:2",
-        [attempt["id"], prev_idx]
-    )
-    if not prev_step:
-        return jsonify({"error": "Нет предыдущего шага"}), 400
+        if current_pointer <= 0:
+            return jsonify({"error": "Нет ходов для отмены"}), 400
 
-    # Читаем предыдущее состояние как JSON
-    prev_state_json = read_clob(prev_step["state_after"])
-    _, flat = parse_board(prev_state_json, grid_size)
+        prev_idx = current_pointer - 1
 
-    misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
+        # ПОЛУЧАЕМ ПРЕДЫДУЩЕЕ СОСТОЯНИЕ КАК СТРОКУ (не CLOB)
+        # Используем TO_CHAR для преобразования CLOB в строку на стороне БД
+        prev_state_row = db.fetch_one("""
+            SELECT TO_CHAR(STATE_AFTER) as state_str 
+            FROM GAME_STEPS 
+            WHERE ATTEMPT_ID = :1 AND STEP_INDEX = :2
+        """, [attempt_id, prev_idx])
 
-    db.execute_query(
-        """UPDATE GAME_ATTEMPTS
-           SET CURRENT_STATE=:1, CURRENT_MISPLACED_TILES=:2,
-               CURRENT_MANHATTAN_DISTANCE=:3, UNDO_POINTER=:4
-           WHERE ID=:5""",
-        [prev_state_json, misplaced, manhattan, prev_idx, attempt["id"]]
-    )
+        if not prev_state_row:
+            return jsonify({"error": "Нет предыдущего шага"}), 400
 
-    board = [flat[r * grid_size:(r + 1) * grid_size] for r in range(grid_size)]
-    pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
+        prev_state_str = prev_state_row["state_str"]
 
-    return jsonify({
-        "status": "ok",
-        "board": board,
-        "steps": prev_idx,
-        "progress": pct,
-        "misplaced": misplaced,
-        "manhattan": manhattan
-    })
+        # Проверяем, что состояние не пустое
+        if not prev_state_str or prev_state_str.isspace() or prev_state_str == '':
+            print(f"ERROR: Previous state is empty for attempt {attempt_id}, step {prev_idx}")
+            return jsonify({"error": "Предыдущее состояние повреждено (пустое)"}), 500
+
+        # Преобразуем target_state в строку
+        target_state_str = read_clob(target_state)
+        if not target_state_str or target_state_str.isspace():
+            return jsonify({"error": "Целевое состояние повреждено"}), 500
+
+        # Парсим состояния
+        _, flat = parse_board(prev_state_str, grid_size)
+        _, tgt_flat = parse_board(target_state_str, grid_size)
+
+        if not flat or not tgt_flat:
+            return jsonify({"error": "Ошибка парсинга состояния"}), 500
+
+        misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
+
+        # Обновляем состояние в БД
+        db.execute_query(
+            "UPDATE GAME_ATTEMPTS SET CURRENT_STATE = :1, CURRENT_MISPLACED_TILES = :2, CURRENT_MANHATTAN_DISTANCE = :3, UNDO_POINTER = :4 WHERE ID = :5",
+            [prev_state_str, misplaced, manhattan, prev_idx, attempt_id]
+        )
+
+        # Обновляем время активности сессии
+        db.execute_query(
+            "UPDATE GAME_SESSIONS SET LAST_ACTIVITY_AT = SYSTIMESTAMP WHERE ID = :1",
+            [gsid]
+        )
+
+        # Формируем доску для ответа
+        board = []
+        for r in range(grid_size):
+            row = flat[r * grid_size:(r + 1) * grid_size]
+            board.append(row)
+
+        pct = progress_pct(init_manhattan, manhattan)
+
+        print(f"Undo successful, new step: {prev_idx}")
+
+        return jsonify({
+            "status": "ok",
+            "board": board,
+            "steps": prev_idx,
+            "progress": pct,
+            "misplaced": misplaced,
+            "manhattan": manhattan,
+            "undoAvailable": prev_idx > 0,
+            "redoAvailable": True
+        })
+
+    except Exception as e:
+        print(f"UNDO error: {str(e)}")
+        traceback.print_exc()
+        return jsonify({"error": f"Ошибка: {str(e)}"}), 500
 
 
 # ================================================================
-# ИГРА -- REDO
+# ИГРА -- REDO (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ================================================================
 
 @app.route("/game/redo", methods=["POST"])
 def redo_move():
+    print("=== REDO CALLED ===")
     if not get_current_user_id():
         return jsonify({"error": "Не авторизован"}), 401
 
@@ -744,59 +823,107 @@ def redo_move():
     if not gsid:
         return jsonify({"error": "Нет активной игровой сессии"}), 400
 
-    attempt = get_active_attempt(gsid)
-    if not attempt:
-        return jsonify({"error": "Нет активной попытки"}), 400
+    if not ensure_db_connection():
+        return jsonify({"error": "Потеряно соединение с БД"}), 500
 
-    # Проверка времени перед возвратом
-    timeout_check = check_timeout(attempt["id"])
-    if timeout_check and timeout_check.get("time_expired") == 1:
-        if handle_timeout(gsid, attempt["id"]):
-            session.pop("game_session_id", None)
-            return jsonify({"error": "Время вышло"}), 400
+    try:
+        # Получаем данные игры
+        game_data = db.fetch_one("""
+            SELECT 
+                GA.ID as attempt_id,
+                GA.UNDO_POINTER,
+                GA.INITIAL_MANHATTAN_DISTANCE,
+                PS.GRID_SIZE,
+                PZ.TARGET_STATE
+            FROM GAME_ATTEMPTS GA
+            JOIN GAME_STATUSES GST ON GA.STATUS_ID = GST.ID
+            JOIN PUZZLES PZ ON GA.PUZZLE_ID = PZ.ID
+            JOIN PUZZLE_SIZES PS ON PZ.PUZZLE_SIZE_ID = PS.ID
+            WHERE GA.SESSION_ID = :1 AND GST.NAME = 'active' AND ROWNUM = 1
+        """, [gsid])
 
-    grid_size = attempt["grid_size"]
+        if not game_data:
+            return jsonify({"error": "Активная игра не найдена"}), 400
 
-    # Получаем целевое состояние
-    target_state_json = read_clob(attempt["target_state"])
-    _, tgt_flat = parse_board(target_state_json, grid_size)
+        attempt_id = game_data["attempt_id"]
+        current_pointer = game_data["undo_pointer"]
+        init_manhattan = game_data["initial_manhattan_distance"]
+        grid_size = game_data["grid_size"]
+        target_state = game_data["target_state"]
 
-    next_idx = attempt["undo_pointer"] + 1
+        print(f"Current undo_pointer: {current_pointer}")
 
-    next_step = db.fetch_one(
-        """SELECT GS.STATE_AFTER FROM GAME_STEPS GS
-           JOIN ACTION_TYPES AT ON GS.ACTION_ID = AT.ID
-           WHERE GS.ATTEMPT_ID=:1 AND GS.STEP_INDEX=:2 AND AT.NAME='move'""",
-        [attempt["id"], next_idx]
-    )
-    if not next_step:
-        return jsonify({"error": "Нет отменённых ходов"}), 400
+        next_idx = current_pointer + 1
 
-    # Читаем следующее состояние как JSON
-    next_state_json = read_clob(next_step["state_after"])
-    _, flat = parse_board(next_state_json, grid_size)
+        # Получаем следующее состояние как строку
+        next_state_row = db.fetch_one("""
+            SELECT TO_CHAR(STATE_AFTER) as state_str 
+            FROM GAME_STEPS 
+            WHERE ATTEMPT_ID = :1 AND STEP_INDEX = :2
+        """, [attempt_id, next_idx])
 
-    misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
+        if not next_state_row:
+            return jsonify({"error": "Нет отменённых ходов"}), 400
 
-    db.execute_query(
-        """UPDATE GAME_ATTEMPTS
-           SET CURRENT_STATE=:1, CURRENT_MISPLACED_TILES=:2,
-               CURRENT_MANHATTAN_DISTANCE=:3, UNDO_POINTER=:4
-           WHERE ID=:5""",
-        [next_state_json, misplaced, manhattan, next_idx, attempt["id"]]
-    )
+        next_state_str = next_state_row["state_str"]
 
-    board = [flat[r * grid_size:(r + 1) * grid_size] for r in range(grid_size)]
-    pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
+        if not next_state_str or next_state_str.isspace():
+            print(f"ERROR: Next state is empty for attempt {attempt_id}, step {next_idx}")
+            return jsonify({"error": "Следующее состояние повреждено (пустое)"}), 500
 
-    return jsonify({
-        "status": "ok",
-        "board": board,
-        "steps": next_idx,
-        "progress": pct,
-        "misplaced": misplaced,
-        "manhattan": manhattan
-    })
+        target_state_str = read_clob(target_state)
+        if not target_state_str or target_state_str.isspace():
+            return jsonify({"error": "Целевое состояние повреждено"}), 500
+
+        _, flat = parse_board(next_state_str, grid_size)
+        _, tgt_flat = parse_board(target_state_str, grid_size)
+
+        if not flat or not tgt_flat:
+            return jsonify({"error": "Ошибка парсинга состояния"}), 500
+
+        misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
+
+        db.execute_query(
+            "UPDATE GAME_ATTEMPTS SET CURRENT_STATE = :1, CURRENT_MISPLACED_TILES = :2, CURRENT_MANHATTAN_DISTANCE = :3, UNDO_POINTER = :4 WHERE ID = :5",
+            [next_state_str, misplaced, manhattan, next_idx, attempt_id]
+        )
+
+        db.execute_query(
+            "UPDATE GAME_SESSIONS SET LAST_ACTIVITY_AT = SYSTIMESTAMP WHERE ID = :1",
+            [gsid]
+        )
+
+        # Проверяем, есть ли еще шаги для REDO
+        has_more_row = db.fetch_one(
+            "SELECT COUNT(*) AS CNT FROM GAME_STEPS WHERE ATTEMPT_ID = :1 AND STEP_INDEX > :2",
+            [attempt_id, next_idx]
+        )
+        redo_available = has_more_row and has_more_row["cnt"] > 0
+
+        board = []
+        for r in range(grid_size):
+            row = flat[r * grid_size:(r + 1) * grid_size]
+            board.append(row)
+
+        pct = progress_pct(init_manhattan, manhattan)
+
+        print(f"Redo successful, new step: {next_idx}, more redo: {redo_available}")
+
+        return jsonify({
+            "status": "ok",
+            "board": board,
+            "steps": next_idx,
+            "progress": pct,
+            "misplaced": misplaced,
+            "manhattan": manhattan,
+            "undoAvailable": True,
+            "redoAvailable": redo_available
+        })
+
+    except Exception as e:
+        print(f"REDO error: {str(e)}")
+        traceback.print_exc()
+        return jsonify({"error": f"Ошибка: {str(e)}"}), 500
 
 
 # ================================================================
@@ -805,7 +932,6 @@ def redo_move():
 
 @app.route("/game/hint", methods=["POST"])
 def get_hint():
-    """Возвращает подсказку с метриками текущего состояния."""
     if not get_current_user_id():
         return jsonify({"error": "Не авторизован"}), 401
 
@@ -813,30 +939,30 @@ def get_hint():
     if not gsid:
         return jsonify({"error": "Нет активной игровой сессии"}), 400
 
-    attempt = get_active_attempt(gsid)
-    if not attempt:
-        return jsonify({"error": "Нет активной попытки"}), 400
+    try:
+        attempt = get_active_attempt(gsid)
+        if not attempt:
+            return jsonify({"error": "Нет активной попытки"}), 400
 
-    grid_size = attempt["grid_size"]
+        grid_size = attempt["grid_size"]
+        current_state_json = read_clob(attempt["current_state"])
+        target_state_json = read_clob(attempt["target_state"])
 
-    # Читаем текущее состояние
-    current_state_json = read_clob(attempt["current_state"])
-    target_state_json = read_clob(attempt["target_state"])
+        _, flat = parse_board(current_state_json, grid_size)
+        _, tgt_flat = parse_board(target_state_json, grid_size)
 
-    _, flat = parse_board(current_state_json, grid_size)
-    _, tgt_flat = parse_board(target_state_json, grid_size)
+        misplaced, manhattan, correct = compute_metrics(flat, tgt_flat, grid_size)
+        pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
 
-    # Вычисляем метрики
-    misplaced, manhattan, correct = compute_metrics(flat, tgt_flat, grid_size)
-    pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
-
-    return jsonify({
-        "misplaced": misplaced,
-        "manhattan": manhattan,
-        "correct": correct,
-        "progress": pct,
-        "steps": attempt["undo_pointer"]
-    })
+        return jsonify({
+            "misplaced": misplaced,
+            "manhattan": manhattan,
+            "correct": correct,
+            "progress": pct
+        })
+    except Exception as e:
+        print(f"HINT error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 
 # ================================================================
@@ -881,20 +1007,23 @@ def leaderboard():
     players = db.fetch_all(
         """SELECT U.ID, U.USERNAME,
                   COUNT(DISTINCT GS.ID) AS TOTAL_GAMES,
-                  SUM(CASE WHEN GST.NAME='solved' THEN 1 ELSE 0 END) AS SOLVED_GAMES,
-                  ROUND(SUM(CASE WHEN GST.NAME='solved' THEN 1 ELSE 0 END) /
-                        NULLIF(COUNT(DISTINCT GS.ID),0)*100, 1) AS SUCCESS_RATE,
-                  ROUND(AVG(CASE WHEN GST.NAME='solved'
-                            THEN (GS.END_TIME - GS.START_TIME)*24*60 END), 1) AS AVG_TIME_MINUTES,
-                  MIN(CASE WHEN GST.NAME='solved' THEN GS.STEPS_COUNT END) AS BEST_STEPS
+                  SUM(CASE WHEN GST.NAME = 'solved' THEN 1 ELSE 0 END) AS SOLVED_GAMES,
+                  CASE 
+                      WHEN COUNT(DISTINCT GS.ID) > 0 
+                      THEN ROUND(SUM(CASE WHEN GST.NAME = 'solved' THEN 1 ELSE 0 END) / 
+                           COUNT(DISTINCT GS.ID) * 100, 1)
+                      ELSE 0 
+                  END AS SUCCESS_RATE,
+                  ROUND(AVG(CASE WHEN GST.NAME = 'solved'
+                            THEN (GS.END_TIME - GS.START_TIME) * 24 * 60 END), 1) AS AVG_TIME_MINUTES,
+                  MIN(CASE WHEN GST.NAME = 'solved' THEN GS.STEPS_COUNT END) AS BEST_STEPS
            FROM USERS U
            LEFT JOIN GAME_SESSIONS GS ON U.ID = GS.USER_ID
            LEFT JOIN GAME_STATUSES GST ON GS.STATUS_ID = GST.ID
            GROUP BY U.ID, U.USERNAME
-           ORDER BY SOLVED_GAMES DESC NULLS LAST, AVG_TIME_MINUTES NULLS LAST"""
+           ORDER BY SUCCESS_RATE DESC, SOLVED_GAMES DESC, AVG_TIME_MINUTES NULLS LAST"""
     )
     return render_template("leaderboard.html", players=players, username=session.get("username"))
-
 
 # ================================================================
 # ИСТОРИЯ
@@ -923,9 +1052,175 @@ def history():
     return render_template("history.html", games=games, username=session.get("username"))
 
 
+
+
 # ================================================================
-# ЗАПУСК
+# ИСТОРИЯ -- ДЕТАЛИ ИГРЫ (AJAX)
 # ================================================================
+
+@app.route("/history/game/<int:session_id>")
+def game_details(session_id):
+    if not get_current_user_id():
+        return jsonify({"error": "Не авторизован"}), 401
+
+    user_id = get_current_user_id()
+
+    # Проверяем что эта игра принадлежит текущему пользователю
+    game = db.fetch_one(
+        """SELECT GS.ID, GS.START_TIME, GS.END_TIME,
+                  GST.NAME AS STATUS, GS.STEPS_COUNT,
+                  PS.GRID_SIZE, DL.NAME AS DIFFICULTY,
+                  ROUND((GS.END_TIME - GS.START_TIME)*24*60, 1) AS TIME_MINUTES,
+                  PZ.SEED
+           FROM GAME_SESSIONS GS
+           JOIN GAME_STATUSES GST ON GS.STATUS_ID = GST.ID
+           JOIN PUZZLES PZ ON GS.PUZZLE_ID = PZ.ID
+           JOIN PUZZLE_SIZES PS ON PZ.PUZZLE_SIZE_ID = PS.ID
+           JOIN DIFFICULTY_LEVELS DL ON PZ.DIFFICULTY_ID = DL.ID
+           WHERE GS.ID = :1 AND GS.USER_ID = :2""",
+        [session_id, user_id]
+    )
+
+    if not game:
+        return jsonify({"error": "Игра не найдена"}), 404
+
+    # История ходов
+    steps = db.fetch_all(
+        """SELECT GS.STEP_INDEX, AT.NAME AS ACTION,
+                  GS.TILE_VALUE, GS.DIRECTION, GS.STEP_TIME, GS.IS_ACTUAL
+           FROM GAME_STEPS GS
+           JOIN ACTION_TYPES AT ON GS.ACTION_ID = AT.ID
+           WHERE GS.SESSION_ID = :1 AND GS.IS_ACTUAL = 1 AND GS.STEP_INDEX > 0
+           ORDER BY GS.STEP_INDEX""",
+        [session_id]
+    )
+
+    # Форматируем данные
+    start_time = game["start_time"]
+    end_time   = game["end_time"]
+
+    def fmt_date(d):
+        if not d:
+            return None
+        if hasattr(d, "strftime"):
+            return d.strftime("%d.%m.%Y %H:%M")
+        return str(d)
+
+    def fmt_time(d):
+        if not d:
+            return None
+        if hasattr(d, "strftime"):
+            return d.strftime("%H:%M:%S")
+        return str(d)
+
+    steps_list = []
+    for s in steps:
+        step_time = s["step_time"]
+        steps_list.append({
+            "index":     s["step_index"],
+            "action":    s["action"],
+            "tile":      s["tile_value"],
+            "direction": s["direction"],
+            "time":      fmt_time(step_time),
+        })
+
+    return jsonify({
+        "session_id":  session_id,
+        "start_time":  fmt_date(start_time),
+        "end_time":    fmt_date(end_time),
+        "status":      game["status"],
+        "steps_count": game["steps_count"],
+        "grid_size":   game["grid_size"],
+        "difficulty":  game["difficulty"],
+        "time_minutes": game["time_minutes"],
+        "seed":        game["seed"],
+        "steps":       steps_list,
+    })
+
+
+# ================================================================
+# ИСТОРИЯ -- ЭКСПОРТ ИГРЫ (скачать JSON)
+# ================================================================
+
+@app.route("/history/export/<int:session_id>")
+def export_game(session_id):
+    if not get_current_user_id():
+        return jsonify({"error": "Не авторизован"}), 401
+
+    user_id = get_current_user_id()
+
+    game = db.fetch_one(
+        """SELECT GS.ID, GS.START_TIME, GS.END_TIME,
+                  GST.NAME AS STATUS, GS.STEPS_COUNT,
+                  PS.GRID_SIZE, DL.NAME AS DIFFICULTY,
+                  PZ.SEED, PZ.TARGET_STATE
+           FROM GAME_SESSIONS GS
+           JOIN GAME_STATUSES GST ON GS.STATUS_ID = GST.ID
+           JOIN PUZZLES PZ ON GS.PUZZLE_ID = PZ.ID
+           JOIN PUZZLE_SIZES PS ON PZ.PUZZLE_SIZE_ID = PS.ID
+           JOIN DIFFICULTY_LEVELS DL ON PZ.DIFFICULTY_ID = DL.ID
+           WHERE GS.ID = :1 AND GS.USER_ID = :2""",
+        [session_id, user_id]
+    )
+
+    if not game:
+        return jsonify({"error": "Игра не найдена"}), 404
+
+    steps = db.fetch_all(
+        """SELECT GS.STEP_INDEX, AT.NAME AS ACTION,
+                  GS.TILE_VALUE, GS.DIRECTION,
+                  TO_CHAR(GS.STATE_AFTER) AS STATE_AFTER, GS.STEP_TIME
+           FROM GAME_STEPS GS
+           JOIN ACTION_TYPES AT ON GS.ACTION_ID = AT.ID
+           WHERE GS.SESSION_ID = :1 AND GS.IS_ACTUAL = 1
+           ORDER BY GS.STEP_INDEX""",
+        [session_id]
+    )
+
+    def fmt(d):
+        if not d:
+            return None
+        if hasattr(d, "strftime"):
+            return d.strftime("%Y-%m-%d %H:%M:%S")
+        return str(d)
+
+    export_data = {
+        "game": {
+            "session_id": session_id,
+            "seed":        game["seed"],
+            "grid_size":   game["grid_size"],
+            "difficulty":  game["difficulty"],
+            "status":      game["status"],
+            "steps_count": game["steps_count"],
+            "start_time":  fmt(game["start_time"]),
+            "end_time":    fmt(game["end_time"]),
+        },
+        "moves": [
+            {
+                "step":      s["step_index"],
+                "action":    s["action"],
+                "tile":      s["tile_value"],
+                "direction": s["direction"],
+                "state":     s["state_after"],
+                "time":      fmt(s["step_time"]),
+            }
+            for s in steps
+        ]
+    }
+
+    from flask import Response
+    import json as json_module
+    response = Response(
+        json_module.dumps(export_data, ensure_ascii=False, indent=2),
+        mimetype="application/json",
+        headers={
+            "Content-Disposition": f"attachment; filename=game_{session_id}.json"
+        }
+    )
+    return response
+
+# ================================================================
+# ИСТОРИЯ -- ДЕТАЛИ ИГРЫ (AJAX)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

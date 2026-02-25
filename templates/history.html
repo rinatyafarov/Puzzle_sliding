@@ -5,14 +5,31 @@
 {% block content %}
 
 <section class="section">
-    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-        <h2 class="section-title" style="margin-bottom: 0;">История игр</h2>
+    <div class="section-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+        <h2 class="section-title" style="margin-bottom:0;">История игр</h2>
         <div class="section-stats">
             <span class="stat-badge">Всего игр: {{ games | length }}</span>
         </div>
     </div>
 
     {% if games %}
+
+    <!-- Фильтры по статусу -->
+    <div class="filters-container" style="margin-bottom:1rem;">
+        <div class="filter-group">
+            <div class="filter-label">Статус:</div>
+            <div class="filter-bar" id="status-filter-bar">
+                <button class="filter-btn active" data-status="all">Все</button>
+                <button class="filter-btn" data-status="solved">✓ Решено</button>
+                <button class="filter-btn" data-status="timeout">⏱ Таймаут</button>
+                <button class="filter-btn" data-status="abandoned">✕ Сдался</button>
+            </div>
+        </div>
+        <div class="filter-stats" style="margin-top:0.5rem;">
+            Показано <span id="shown-count">{{ games | length }}</span> из {{ games | length }}
+        </div>
+    </div>
+
     <div class="table-wrap">
         <table class="data-table">
             <thead>
@@ -23,68 +40,38 @@
                     <th>Статус</th>
                     <th>Ходов</th>
                     <th>Время</th>
-                    <th>Прогресс</th>
-                    <th>Действия</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
                 {% for g in games %}
-                <tr class="game-row" data-game-id="{{ g.session_id }}">
+                <tr class="game-row" data-game-id="{{ g.session_id }}" data-status="{{ g.status }}">
                     <td>{{ g.start_time.strftime('%d.%m.%Y %H:%M') if g.start_time else '—' }}</td>
                     <td>{{ g.grid_size }}×{{ g.grid_size }}</td>
-                    <td>
-                        <span class="tag tag-{{ g.difficulty | lower }}">{{ g.difficulty }}</span>
-                    </td>
+                    <td><span class="tag tag-{{ g.difficulty | lower }}">{{ g.difficulty }}</span></td>
                     <td>
                         <span class="status-badge status-{{ g.status }}">
-                            {% if g.status == 'solved' %}
-                                <span class="status-icon">✓</span> Решено
-                            {% elif g.status == 'abandoned' %}
-                                <span class="status-icon">✕</span> Сдался
-                            {% elif g.status == 'timeout' %}
-                                <span class="status-icon">⏱</span> Время вышло
-                            {% elif g.status == 'exported' %}
-                                <span class="status-icon">↗</span> Экспорт
-                            {% else %}
-                                {{ g.status }}
-                            {% endif %}
+                            {% if g.status == 'solved' %}✓ Решено
+                            {% elif g.status == 'abandoned' %}✕ Сдался
+                            {% elif g.status == 'timeout' %}⏱ Время вышло
+                            {% elif g.status == 'exported' %}↗ Экспорт
+                            {% else %}{{ g.status }}{% endif %}
                         </span>
                     </td>
                     <td><strong>{{ g.steps_count }}</strong></td>
                     <td>
                         {% if g.time_minutes %}
-                            {% set minutes = g.time_minutes|int %}
-                            {% set seconds = ((g.time_minutes - minutes) * 60)|int %}
-                            <span class="time-display">{{ "%02d:%02d"|format(minutes, seconds) }}</span>
-                            <small class="text-muted">({{ g.time_minutes }} мин)</small>
+                            {% set m = g.time_minutes|int %}
+                            {% set s = ((g.time_minutes - m) * 60)|int %}
+                            <span class="time-display">{{ "%02d:%02d"|format(m, s) }}</span>
                         {% else %}
                             <span class="text-muted">—</span>
                         {% endif %}
                     </td>
                     <td>
-                        {% if g.status == 'solved' %}
-                            <div class="progress-indicator-small">
-                                <div class="progress-bar-small" style="width: 100%; background: var(--easy);"></div>
-                                <span class="progress-text">100%</span>
-                            </div>
-                        {% elif g.status == 'timeout' %}
-                            <div class="progress-indicator-small">
-                                <div class="progress-bar-small" style="width: {{ g.progress_percent or 0 }}%; background: var(--hard);"></div>
-                                <span class="progress-text">{{ g.progress_percent or 0 }}%</span>
-                            </div>
-                        {% else %}
-                            <div class="progress-indicator-small">
-                                <div class="progress-bar-small" style="width: {{ g.progress_percent or 0 }}%; background: var(--medium);"></div>
-                                <span class="progress-text">{{ g.progress_percent or 0 }}%</span>
-                            </div>
-                        {% endif %}
-                    </td>
-                    <td>
-                        <button class="btn btn-sm btn-outline view-game-btn" 
-                                onclick="showGameDetails('{{ g.session_id }}')"
-                                title="Просмотреть детали игры">
-                            👁️
-                        </button>
+                        <button class="btn btn-sm btn-outline"
+                                onclick="showGameDetails({{ g.session_id }})"
+                                title="Детали игры">👁 Детали</button>
                     </td>
                 </tr>
                 {% endfor %}
@@ -92,25 +79,24 @@
         </table>
     </div>
 
-    <!-- Статистика по играм -->
-    <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 2rem;">
-        {% set solved_count = games | selectattr('status', 'equalto', 'solved') | list | length %}
-        {% set timeout_count = games | selectattr('status', 'equalto', 'timeout') | list | length %}
-        {% set abandoned_count = games | selectattr('status', 'equalto', 'abandoned') | list | length %}
-        
-        <div class="stat-card" style="text-align: center;">
-            <div class="stat-value" style="color: var(--easy);">{{ solved_count }}</div>
+    <!-- Итоговая статистика -->
+    {% set solved_count    = games | selectattr('status','equalto','solved')   | list | length %}
+    {% set timeout_count   = games | selectattr('status','equalto','timeout')  | list | length %}
+    {% set abandoned_count = games | selectattr('status','equalto','abandoned')| list | length %}
+    <div class="stats-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:1rem; margin-top:2rem;">
+        <div class="stat-card" style="text-align:center;">
+            <div class="stat-value" style="color:var(--easy);">{{ solved_count }}</div>
             <div class="stat-label">Решено</div>
         </div>
-        <div class="stat-card" style="text-align: center;">
-            <div class="stat-value" style="color: var(--hard);">{{ timeout_count }}</div>
+        <div class="stat-card" style="text-align:center;">
+            <div class="stat-value" style="color:var(--hard);">{{ timeout_count }}</div>
             <div class="stat-label">Таймаут</div>
         </div>
-        <div class="stat-card" style="text-align: center;">
-            <div class="stat-value" style="color: var(--medium);">{{ abandoned_count }}</div>
+        <div class="stat-card" style="text-align:center;">
+            <div class="stat-value" style="color:var(--medium);">{{ abandoned_count }}</div>
             <div class="stat-label">Сдался</div>
         </div>
-        <div class="stat-card" style="text-align: center;">
+        <div class="stat-card" style="text-align:center;">
             <div class="stat-value">{{ games | map(attribute='steps_count') | sum }}</div>
             <div class="stat-label">Всего ходов</div>
         </div>
@@ -121,22 +107,23 @@
         <div class="empty-icon">📜</div>
         <h3>История пуста</h3>
         <p>Вы ещё не сыграли ни одной игры. Самое время начать!</p>
-        <a href="{{ url_for('index') }}" class="btn btn-primary" style="margin-top: 1rem;">К каталогу игр</a>
+        <a href="{{ url_for('index') }}" class="btn btn-primary" style="margin-top:1rem;">К каталогу игр</a>
     </div>
     {% endif %}
 
 </section>
 
-<!-- Модальное окно с деталями игры -->
+
+<!-- ═══ Модальное окно: детали игры ════════════════════════════ -->
 <div class="modal" id="game-details-modal" style="display:none">
-    <div class="modal-card" style="max-width: 500px;">
-        <div class="modal-header">
-            <h2>Детали игры</h2>
-            <button class="modal-close" onclick="document.getElementById('game-details-modal').style.display='none'">✕</button>
+    <div class="modal-card" style="max-width:560px; width:100%;">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.2rem;">
+            <h2 style="margin:0;" id="modal-title">Детали игры</h2>
+            <button class="modal-close"
+                    onclick="document.getElementById('game-details-modal').style.display='none'">✕</button>
         </div>
-        <div class="modal-body" id="game-details-content">
-            <!-- Заполняется динамически -->
-            <div class="loading-spinner">Загрузка...</div>
+        <div id="game-details-content">
+            <div class="loading-state">Загрузка…</div>
         </div>
     </div>
 </div>
@@ -145,208 +132,129 @@
 
 {% block scripts %}
 <script>
-    // Функция для показа деталей игры
-    async function showGameDetails(gameId) {
-        const modal = document.getElementById('game-details-modal');
-        const content = document.getElementById('game-details-content');
-        
-        if (!modal || !content) return;
-        
-        // Показываем загрузку
-        content.innerHTML = '<div class="loading-spinner">Загрузка...</div>';
-        modal.style.display = 'flex';
-        
-        try {
-            // Здесь можно сделать запрос к серверу для получения деталей игры
-            // Пока используем заглушку
-            setTimeout(() => {
-                content.innerHTML = `
-                    <div class="game-details">
-                        <p><strong>ID игры:</strong> ${gameId}</p>
-                        <p><strong>Дата:</strong> ${getGameDate(gameId)}</p>
-                        <p><strong>Ходы:</strong> <span id="detail-steps">—</span></p>
-                        <p><strong>Время:</strong> <span id="detail-time">—</span></p>
-                        <p><strong>Статус:</strong> <span id="detail-status">—</span></p>
-                        
-                        <h3 style="margin-top: 1rem; margin-bottom: 0.5rem;">История ходов</h3>
-                        <div class="steps-history" style="max-height: 200px; overflow-y: auto; background: var(--surface2); padding: 0.5rem; border-radius: var(--radius);">
-                            <p class="text-muted" style="text-align: center;">Загрузка истории ходов...</p>
-                        </div>
-                        
-                        <div class="modal-actions" style="margin-top: 1rem;">
-                            <button class="btn btn-outline" onclick="exportGame('${gameId}')">📥 Экспорт</button>
-                            <button class="btn btn-primary" onclick="closeModal()">Закрыть</button>
-                        </div>
-                    </div>
-                `;
-            }, 500);
-            
-        } catch (e) {
-            content.innerHTML = '<p class="error">Ошибка загрузки деталей игры</p>';
-        }
-    }
-    
-    // Вспомогательная функция для получения даты игры (заглушка)
-    function getGameDate(gameId) {
-        const rows = document.querySelectorAll('.game-row');
-        for (let row of rows) {
-            if (row.dataset.gameId === gameId.toString()) {
-                return row.cells[0].textContent;
-            }
-        }
-        return 'Неизвестно';
-    }
-    
-    // Функция для экспорта игры
-    async function exportGame(gameId) {
-        try {
-            // Здесь будет запрос на экспорт
-            alert(`Экспорт игры ${gameId} будет доступен в следующей версии`);
-        } catch (e) {
-            alert('Ошибка при экспорте');
-        }
-    }
-    
-    // Закрытие модального окна
-    function closeModal() {
-        document.getElementById('game-details-modal').style.display = 'none';
-    }
-    
-    // Фильтрация по статусу (дополнительная функция)
-    function filterGames(status) {
-        const rows = document.querySelectorAll('.game-row');
-        let visibleCount = 0;
-        
-        rows.forEach(row => {
-            const statusCell = row.querySelector('.status-badge');
-            if (status === 'all' || statusCell.classList.contains(`status-${status}`)) {
-                row.style.display = '';
-                visibleCount++;
-            } else {
-                row.style.display = 'none';
-            }
-        });
-        
-        // Обновляем счетчик
-        const filterStats = document.getElementById('filter-stats');
-        if (filterStats) {
-            filterStats.textContent = `Показано ${visibleCount} из ${rows.length}`;
-        }
-    }
-    
-    // Добавляем фильтры на страницу
-    document.addEventListener('DOMContentLoaded', function() {
-        const section = document.querySelector('.section');
-        const title = document.querySelector('.section-title');
-        
-        // Создаем фильтры
-        const filtersDiv = document.createElement('div');
-        filtersDiv.className = 'filters-container';
-        filtersDiv.style.marginBottom = '1rem';
-        filtersDiv.style.padding = '1rem';
-        filtersDiv.innerHTML = `
-            <div class="filter-group">
-                <div class="filter-label">Фильтр по статусу:</div>
-                <div class="filter-bar">
-                    <button class="filter-btn active" onclick="filterGames('all')">Все</button>
-                    <button class="filter-btn" onclick="filterGames('solved')">✓ Решено</button>
-                    <button class="filter-btn" onclick="filterGames('timeout')">⏱ Таймаут</button>
-                    <button class="filter-btn" onclick="filterGames('abandoned')">✕ Сдался</button>
-                </div>
-            </div>
-            <div class="filter-stats" id="filter-stats" style="margin-top: 0.5rem;">
-                Показано ${document.querySelectorAll('.game-row').length} из ${document.querySelectorAll('.game-row').length}
-            </div>
-        `;
-        
-        // Вставляем фильтры после заголовка
-        title.parentNode.insertBefore(filtersDiv, title.nextSibling);
-        
-        // Добавляем обработчики для кнопок фильтров
-        document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
+// ── Фильтрация по статусу ────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    const filterBtns = document.querySelectorAll('#status-filter-bar .filter-btn');
+    const rows       = document.querySelectorAll('.game-row');
+    const counter    = document.getElementById('shown-count');
+
+    filterBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            filterBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const status = btn.dataset.status;
+            let visible = 0;
+            rows.forEach(row => {
+                const show = status === 'all' || row.dataset.status === status;
+                row.style.display = show ? '' : 'none';
+                if (show) visible++;
             });
-        });
-        
-        // Закрытие модального окна по клику вне
-        window.addEventListener('click', (e) => {
-            const modal = document.getElementById('game-details-modal');
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
+            counter.textContent = visible;
         });
     });
+
+    // Закрытие модалки по клику на фон
+    document.getElementById('game-details-modal').addEventListener('click', e => {
+        if (e.target.id === 'game-details-modal') e.target.style.display = 'none';
+    });
+});
+
+
+// ── Показ деталей игры (реальный AJAX) ───────────────────────────
+async function showGameDetails(sessionId) {
+    const modal   = document.getElementById('game-details-modal');
+    const content = document.getElementById('game-details-content');
+    const title   = document.getElementById('modal-title');
+
+    title.textContent = 'Детали игры #' + sessionId;
+    content.innerHTML = '<div class="loading-state">Загрузка…</div>';
+    modal.style.display = 'flex';
+
+    try {
+        const res  = await fetch('/history/game/' + sessionId);
+        const data = await res.json();
+
+        if (data.error) {
+            content.innerHTML = '<p class="error-text">' + data.error + '</p>';
+            return;
+        }
+
+        // Цвет статуса
+        const statusClass = { solved:'status-solved', abandoned:'status-abandoned', timeout:'status-timeout' }[data.status_raw] || '';
+
+        // Список ходов
+        let stepsHtml = '';
+        if (data.steps && data.steps.length > 0) {
+            stepsHtml = data.steps.map(s =>
+                '<div class="step-item">' +
+                    '<span class="step-num">' + s.index + '</span>' +
+                    '<span class="step-desc">' + s.desc + '</span>' +
+                    '<span class="step-time">' + s.time + '</span>' +
+                '</div>'
+            ).join('');
+        } else {
+            stepsHtml = '<p class="text-muted" style="text-align:center;padding:1rem;">Ходов нет</p>';
+        }
+
+        content.innerHTML =
+            '<div class="detail-grid">' +
+                '<div class="detail-row"><span class="detail-label">Seed</span><span class="detail-value"><code>' + data.seed + '</code></span></div>' +
+                '<div class="detail-row"><span class="detail-label">Дата</span><span class="detail-value">' + data.start_time + '</span></div>' +
+                '<div class="detail-row"><span class="detail-label">Поле</span><span class="detail-value">' + data.grid_size + '×' + data.grid_size + '</span></div>' +
+                '<div class="detail-row"><span class="detail-label">Сложность</span><span class="detail-value difficulty-' + data.difficulty.toLowerCase() + '">' + data.difficulty + '</span></div>' +
+                '<div class="detail-row"><span class="detail-label">Статус</span><span class="detail-value status-badge ' + statusClass + '">' + data.status + '</span></div>' +
+                '<div class="detail-row"><span class="detail-label">Ходов</span><span class="detail-value"><strong>' + data.steps_count + '</strong></span></div>' +
+                '<div class="detail-row"><span class="detail-label">Время</span><span class="detail-value time-display">' + data.time_str + '</span></div>' +
+            '</div>' +
+            '<h3 style="margin:1.2rem 0 0.5rem;font-size:0.95rem;color:var(--accent);">История ходов</h3>' +
+            '<div class="steps-history">' + stepsHtml + '</div>' +
+            '<div class="modal-actions" style="margin-top:1.2rem;">' +
+                '<button class="btn btn-outline" onclick="exportGame(' + sessionId + ')">📥 Экспорт JSON</button>' +
+                '<button class="btn btn-primary" onclick="document.getElementById(\'game-details-modal\').style.display=\'none\'">Закрыть</button>' +
+            '</div>';
+
+    } catch (e) {
+        content.innerHTML = '<p class="error-text">Ошибка загрузки: ' + e.message + '</p>';
+    }
+}
+
+
+// ── Экспорт игры (скачать JSON файл) ────────────────────────────
+function exportGame(sessionId) {
+    window.location.href = '/history/export/' + sessionId;
+}
 </script>
 
 <style>
-    /* Дополнительные стили для истории */
-    .progress-indicator-small {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100px;
-    }
-    
-    .progress-bar-small {
-        height: 4px;
-        border-radius: 2px;
-        transition: width 0.3s ease;
-    }
-    
-    .progress-text {
-        font-size: 0.7rem;
-        color: var(--text-muted);
-        min-width: 35px;
-    }
-    
-    .time-display {
-        font-family: var(--font-mono);
-        font-weight: 700;
-        color: var(--accent);
-    }
-    
-    .status-icon {
-        margin-right: 4px;
-    }
-    
-    .loading-spinner {
-        text-align: center;
-        padding: 2rem;
-        color: var(--text-muted);
-    }
-    
-    .game-details {
-        padding: 0.5rem;
-    }
-    
-    .steps-history {
-        font-size: 0.8rem;
-    }
-    
-    .steps-history .step-item {
-        display: flex;
-        justify-content: space-between;
-        padding: 0.3rem 0.5rem;
-        border-bottom: 1px solid var(--border);
-    }
-    
-    .steps-history .step-item:last-child {
-        border-bottom: none;
-    }
-    
-    .view-game-btn {
-        padding: 4px 8px;
-        font-size: 1rem;
-    }
-    
-    .stat-badge {
-        background: var(--surface2);
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        color: var(--text-muted);
-    }
+.detail-grid { display:flex; flex-direction:column; gap:0; }
+.detail-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:0.55rem 0; border-bottom:1px solid var(--border); font-size:0.9rem;
+}
+.detail-row:last-child { border-bottom:none; }
+.detail-label { color:var(--text-muted); flex-shrink:0; margin-right:1rem; }
+.detail-value { text-align:right; }
+
+.steps-history {
+    max-height:220px; overflow-y:auto;
+    background:var(--surface2); border-radius:var(--radius);
+    border:1px solid var(--border);
+}
+.step-item {
+    display:grid; grid-template-columns:2.5rem 1fr auto;
+    gap:0.5rem; align-items:center;
+    padding:0.35rem 0.75rem; border-bottom:1px solid var(--border);
+    font-size:0.82rem;
+}
+.step-item:last-child { border-bottom:none; }
+.step-num  { color:var(--accent); font-family:var(--font-mono); font-weight:700; }
+.step-desc { color:var(--text); }
+.step-time { color:var(--text-muted); font-family:var(--font-mono); font-size:0.75rem; }
+
+.time-display  { font-family:var(--font-mono); font-weight:700; color:var(--accent); }
+.loading-state { text-align:center; padding:2rem; color:var(--text-muted); }
+.error-text    { color:var(--hard); text-align:center; padding:1rem; }
+.stat-badge    { background:var(--surface2); padding:4px 12px; border-radius:20px;
+                 font-size:0.8rem; color:var(--text-muted); }
 </style>
 {% endblock %}

@@ -1588,3 +1588,85 @@ a {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
+
+/* ================================================================
+   ТАЙМЕР — расширенные стили
+   ================================================================ */
+
+.timer-card {
+    position: relative;
+    overflow: hidden;
+}
+
+.timer-value {
+    font-family: var(--font-mono);
+    font-size: 1.6rem;
+    color: var(--accent);
+    letter-spacing: 3px;
+    transition: color 0.3s ease;
+}
+
+.timer-value.warning {
+    color: #e05050;
+    animation: timerPulse 0.7s ease-in-out infinite;
+}
+
+.timer-card.timer-urgent {
+    border-color: #e05050 !important;
+    box-shadow: 0 0 12px rgba(224,80,80,0.25);
+    animation: cardShake 0.4s ease-in-out;
+}
+
+@keyframes cardShake {
+    0%,100% { transform: translateX(0); }
+    25%      { transform: translateX(-4px); }
+    75%      { transform: translateX(4px); }
+}
+
+.time-limit-badge {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-left: 4px;
+}
+
+/* Прогресс-бар таймера */
+.timer-progress-wrap {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.timer-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 1s linear, background 1s ease;
+}
+
+/* ================================================================
+   ТОСТ — предупреждение о времени
+   ================================================================ */
+.time-warning-toast {
+    position: fixed;
+    top: 80px;
+    right: 24px;
+    z-index: 9999;
+    background: #e05050;
+    color: #fff;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 0.95rem;
+    padding: 12px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(224,80,80,0.45);
+    animation: toastSlideIn 0.3s ease;
+}
+
+@keyframes toastSlideIn {
+    from { opacity: 0; transform: translateX(60px); }
+    to   { opacity: 1; transform: translateX(0); }
+}

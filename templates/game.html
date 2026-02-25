@@ -22,14 +22,19 @@
             <div class="stat-label">Ходов</div>
             <div class="stat-value" id="steps-count">{{ active.current_step }}</div>
         </div>
-        
-        <!-- НОВЫЙ БЛОК: Таймер -->
-        <div class="stat-card">
-            <div class="stat-label">Время</div>
-            <div class="stat-value" id="game-timer">00:00</div>
+
+        <!-- Таймер — синхронизирован с сервером -->
+        <div class="stat-card timer-card" id="timer-card">
+            <div class="stat-label">
+                Время
+                <span class="time-limit-badge">/ {{ (active.time_limit_seconds // 60) }}мин</span>
+            </div>
+            <div class="stat-value timer-value" id="game-timer">00:00</div>
+            <div class="timer-progress-wrap">
+                <div class="timer-progress-bar" id="timer-progress-bar"></div>
+            </div>
         </div>
-        <!-- КОНЕЦ НОВОГО БЛОКА -->
-        
+
         <div class="stat-card">
             <div class="stat-label">Не на месте</div>
             <div class="stat-value" id="misplaced-count">{{ active.misplaced_tiles }}</div>
@@ -65,8 +70,8 @@
         <div class="game-shortcuts">
             <div class="shortcuts-title">Горячие клавиши:</div>
             <div class="shortcut-item"><span class="key">1-9</span> - выбрать плитку</div>
-            <div class="shortcut-item"><span class="key">Z</span> - отмена</div>
-            <div class="shortcut-item"><span class="key">Y</span> - вернуть</div>
+            <div class="shortcut-item"><span class="key">Ctrl+Z</span> - отмена</div>
+            <div class="shortcut-item"><span class="key">Ctrl+Y</span> - вернуть</div>
             <div class="shortcut-item"><span class="key">H</span> - подсказка</div>
         </div>
     </aside>
@@ -83,8 +88,6 @@
                     {% for tile in row %}
                     <div class="tile {% if tile == 0 %}tile-empty{% endif %}"
                          data-value="{{ tile }}"
-                         data-row="{{ loop.index0 }}"
-                         data-col="{{ loop.index0 }}"
                          {% if tile != 0 %}onclick="moveTile({{ tile }})"{% endif %}>
                         {% if tile != 0 %}
                             <span class="tile-number">{{ tile }}</span>
@@ -106,9 +109,7 @@
                     {% for tile in row %}
                     <div class="mini-tile {% if tile == 0 %}mini-empty{% endif %}"
                          data-value="{{ tile }}">
-                        {% if tile != 0 and tile < 100 %}
-                            {{ tile }}
-                        {% endif %}
+                        {% if tile != 0 and tile < 100 %}{{ tile }}{% endif %}
                     </div>
                     {% endfor %}
                 {% endfor %}
@@ -119,7 +120,7 @@
 
 </div>
 
-<!-- Модальное окно победы -->
+<!-- ═══ Модальное окно победы ═══════════════════════════════════ -->
 <div class="modal" id="win-modal" style="display:none">
     <div class="modal-card">
         <div class="modal-icon">🏆</div>
@@ -150,7 +151,7 @@
     </div>
 </div>
 
-<!-- Модальное окно подсказки -->
+<!-- ═══ Модальное окно подсказки ════════════════════════════════ -->
 <div class="modal" id="hint-modal" style="display:none">
     <div class="modal-card modal-small">
         <div class="modal-icon">💡</div>
@@ -158,31 +159,29 @@
         <div id="hint-content" class="hint-content">
             <p>Анализ текущей позиции...</p>
         </div>
-        <button class="btn btn-primary btn-full" onclick="document.getElementById('hint-modal').style.display='none'">Закрыть</button>
+        <button class="btn btn-primary btn-full"
+                onclick="document.getElementById('hint-modal').style.display='none'">Закрыть</button>
     </div>
 </div>
 
-<!-- Модальное окно превышения времени -->
+<!-- ═══ Модальное окно: ВРЕМЯ ВЫШЛО ════════════════════════════ -->
 <div class="modal" id="timeout-modal" style="display:none">
     <div class="modal-card">
         <div class="modal-icon">⏰</div>
         <h2>Время вышло!</h2>
-        <p>К сожалению, вы не уложились в лимит времени</p>
+        <p>К сожалению, вы не уложились в отведённое время</p>
         <div class="modal-stats">
             <div class="modal-stat-row">
-                <span>Сделано ходов:</span>
-                <strong id="timeout-steps">{{ active.current_step }}</strong>
+                <span>Сложность:</span>
+                <strong class="difficulty-{{ active.difficulty | lower }}">{{ active.difficulty }}</strong>
             </div>
             <div class="modal-stat-row">
                 <span>Лимит времени:</span>
-                <strong>
-                    {% if active.grid_size == 3 %}08:00
-                    {% elif active.grid_size == 4 %}10:00
-                    {% elif active.grid_size == 5 %}13:00
-                    {% elif active.grid_size == 6 %}15:00
-                    {% elif active.grid_size == 7 %}18:00
-                    {% else %}15:00{% endif %}
-                </strong>
+                <strong id="timeout-limit-display">{{ (active.time_limit_seconds // 60) }} мин</strong>
+            </div>
+            <div class="modal-stat-row">
+                <span>Сделано ходов:</span>
+                <strong id="timeout-steps">{{ active.current_step }}</strong>
             </div>
         </div>
         <div class="modal-actions">
@@ -192,136 +191,120 @@
     </div>
 </div>
 
+<!-- ═══ Предупреждение о скором конце времени (тост) ═══════════ -->
+<div id="time-warning-toast" class="time-warning-toast" style="display:none">
+    ⚠️ Осталась 1 минута!
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='game.js') }}"></script>
 <script>
-    // Глобальные переменные для таймера
-    const GRID_SIZE = {{ active.grid_size }};
-    const INITIAL_MANHATTAN = {{ active.initial_manhattan }};
-    const SESSION_ID = {{ active.session_id }};
-    const TIME_LIMIT_MINUTES = {
-        3: 8,   // 8 минут для 3x3
-        4: 10,  // 10 минут для 4x4
-        5: 13,  // 13 минут для 5x5
-        6: 15,  // 15 минут для 6x6
-        7: 18   // 18 минут для 7x7
-    }[GRID_SIZE] || 15;
-    
-    // Преобразуем в секунды
-    const TIME_LIMIT_SECONDS = TIME_LIMIT_MINUTES * 60;
-    
-    let timerSeconds = 0;
-    let timerInterval = null;
-    let timerRunning = true;
-    
-    // Функция инициализации таймера
-    function initTimer() {
-        // Пытаемся восстановить время из sessionStorage
-        const savedTime = sessionStorage.getItem('puzzle_timer_' + SESSION_ID);
-        if (savedTime) {
-            timerSeconds = parseInt(savedTime);
-        } else {
-            timerSeconds = 0;
-        }
-        
-        updateTimerDisplay();
-        
-        // Запускаем таймер
-        if (timerInterval) clearInterval(timerInterval);
-        timerInterval = setInterval(() => {
-            if (timerRunning) {
-                timerSeconds++;
-                
-                // Проверка на превышение лимита времени
-                if (timerSeconds >= TIME_LIMIT_SECONDS) {
-                    timerSeconds = TIME_LIMIT_SECONDS;
-                    updateTimerDisplay();
-                    stopTimer();
-                    showTimeoutModal();
-                } else {
-                    updateTimerDisplay();
-                }
-                
-                // Сохраняем в sessionStorage
-                sessionStorage.setItem('puzzle_timer_' + SESSION_ID, timerSeconds.toString());
-            }
-        }, 1000);
+    // ── Константы из Python (серверные значения) ──────────────────
+    const SESSION_ID         = {{ active.session_id }};
+    const GRID_SIZE          = {{ active.grid_size }};
+    const INITIAL_MANHATTAN  = {{ active.initial_manhattan }};
+    const TIME_LIMIT_SECONDS = {{ active.time_limit_seconds }};
+    // Сколько секунд уже прошло по данным сервера (момент загрузки страницы)
+    const SERVER_ELAPSED_AT_LOAD = {{ active.elapsed_seconds }};
+    const PAGE_LOAD_TS = Date.now();  // мс когда страница загрузилась
+
+    // ── Таймер ────────────────────────────────────────────────────
+    let timerInterval   = null;
+    let gameOver        = false;
+    let warnShown       = false;
+
+    function getElapsed() {
+        // Реальное прошедшее время = серверное на момент загрузки +
+        //                            время прошедшее с загрузки страницы
+        const sinceLoad = Math.floor((Date.now() - PAGE_LOAD_TS) / 1000);
+        return SERVER_ELAPSED_AT_LOAD + sinceLoad;
     }
-    
-    // Обновление отображения таймера
+
+    function formatTime(sec) {
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+
     function updateTimerDisplay() {
-        const timerEl = document.getElementById('game-timer');
-        if (timerEl) {
-            const minutes = Math.floor(timerSeconds / 60);
-            const seconds = timerSeconds % 60;
-            timerEl.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-            
-            // Добавляем класс предупреждения если осталось мало времени
-            const remaining = TIME_LIMIT_SECONDS - timerSeconds;
-            if (remaining < 60) { // Меньше минуты
-                timerEl.classList.add('warning');
-            } else {
-                timerEl.classList.remove('warning');
-            }
+        const elapsed   = getElapsed();
+        const remaining = Math.max(0, TIME_LIMIT_SECONDS - elapsed);
+        const timerEl   = document.getElementById('game-timer');
+        const barEl     = document.getElementById('timer-progress-bar');
+        const cardEl    = document.getElementById('timer-card');
+
+        if (timerEl) timerEl.textContent = formatTime(elapsed);
+
+        // Прогресс-бар таймера (заполняется по мере расхода времени)
+        if (barEl) {
+            const pct = Math.min(100, elapsed / TIME_LIMIT_SECONDS * 100);
+            barEl.style.width = pct + '%';
+
+            // Цвет: зелёный → жёлтый → красный
+            if (pct < 60)      barEl.style.background = 'var(--accent)';
+            else if (pct < 80) barEl.style.background = '#f0c040';
+            else               barEl.style.background = '#e05050';
+        }
+
+        // Предупреждение — 1 минута
+        if (!warnShown && remaining <= 60 && remaining > 0) {
+            warnShown = true;
+            if (timerEl) timerEl.classList.add('warning');
+            if (cardEl)  cardEl.classList.add('timer-urgent');
+            showTimeWarningToast();
+        }
+
+        // Время вышло на клиенте
+        if (remaining <= 0 && !gameOver) {
+            triggerTimeout();
         }
     }
-    
-    // Остановка таймера
-    function stopTimer() {
-        timerRunning = false;
-        if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
+
+    function showTimeWarningToast() {
+        const toast = document.getElementById('time-warning-toast');
+        if (toast) {
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 4000);
         }
     }
-    
-    // Показ модального окна при превышении времени
-    function showTimeoutModal() {
-        const modal = document.getElementById('timeout-modal');
-        const stepsEl = document.getElementById('timeout-steps');
+
+    function triggerTimeout() {
+        if (gameOver) return;
+        gameOver = true;
+        clearInterval(timerInterval);
+
+        // Уведомляем сервер
+        fetch('/game/check-timeout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).catch(() => {});
+
+        // Показываем модалку
+        const stepsEl   = document.getElementById('timeout-steps');
         const stepsCount = document.getElementById('steps-count');
-        
-        if (stepsEl && stepsCount) {
-            stepsEl.textContent = stepsCount.textContent;
-        }
-        
-        if (modal) {
-            modal.style.display = 'flex';
-            
-            // Автоматически завершаем игру через 3 секунды
-            setTimeout(() => {
-                window.location.href = "{{ url_for('index') }}";
-            }, 3000);
-        }
+        if (stepsEl && stepsCount) stepsEl.textContent = stepsCount.textContent;
+
+        const modal = document.getElementById('timeout-modal');
+        if (modal) modal.style.display = 'flex';
     }
-    
-    // Сброс таймера (для новой игры)
-    function resetTimer() {
-        timerSeconds = 0;
-        timerRunning = true;
-        updateTimerDisplay();
-        sessionStorage.removeItem('puzzle_timer_' + SESSION_ID);
+
+    function stopGameTimer() {
+        gameOver = true;
+        clearInterval(timerInterval);
     }
-    
-    // Сохраняем время перед уходом со страницы
-    window.addEventListener('beforeunload', function() {
-        if (timerRunning) {
-            sessionStorage.setItem('puzzle_timer_' + SESSION_ID, timerSeconds.toString());
-        }
-    });
-    
-    // Инициализация при загрузке страницы
-    document.addEventListener('DOMContentLoaded', function() {
-        initTimer();
-        
-        // Сохраняем ссылку на функцию для использования в game.js
-        window.gameTimer = {
-            stop: stopTimer,
-            getSeconds: () => timerSeconds,
-            getTimeLimit: () => TIME_LIMIT_SECONDS
-        };
-    });
+
+    // Стартуем таймер
+    timerInterval = setInterval(updateTimerDisplay, 1000);
+    updateTimerDisplay();  // сразу отрисовать без задержки
+
+    // Экспортируем для game.js
+    window.gameTimer = {
+        stop:        stopGameTimer,
+        getElapsed:  getElapsed,
+        getSeconds:  getElapsed,  // совместимость
+        getTimeLimit: () => TIME_LIMIT_SECONDS
+    };
 </script>
 {% endblock %}
