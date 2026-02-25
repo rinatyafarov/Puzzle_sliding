@@ -1,13 +1,9 @@
 import oracledb
+from config import DB_USER, DB_PASSWORD, DB_DSN
 
 # ================================================================
 # Настройки подключения к Oracle
-# Замените на ваши данные
 # ================================================================
-
-DB_USER = "system"
-DB_PASSWORD = "toor"
-DB_DSN = "localhost:1521/XEPDB1"  # host:port/service_name
 
 # Глобальный пул соединений (опционально, для производительности)
 connection_pool = None

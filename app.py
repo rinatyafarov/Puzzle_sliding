@@ -3,11 +3,32 @@ import db
 import json
 import traceback
 import time
+import random
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
 app.secret_key = "sliding_puzzle_secret_key"
-app.config['SESSION_TIMEOUT_MINUTES'] = 30  # Таймаут сессии в минутах
+app.config['SESSION_TIMEOUT_MINUTES'] = 30
+
+# ================================================================
+# КОНФИГУРАЦИЯ ПЕРЕМЕШИВАНИЯ
+# ================================================================
+
+# Количество ходов для перемешивания в зависимости от сложности
+SHUFFLE_MOVES = {
+    'Easy': 50,
+    'Medium': 200,
+    'Hard': 500
+}
+
+# Множители для разных размеров поля
+SIZE_MULTIPLIERS = {
+    3: 1,  # 3x3 - базовый
+    4: 2,  # 4x4 - в 2 раза больше ходов
+    5: 3,  # 5x5 - в 3 раза больше ходов
+    6: 4,  # 6x6 - в 4 раза больше ходов
+    7: 5  # 7x7 - в 5 раз больше ходов
+}
 
 
 # ================================================================
@@ -68,7 +89,6 @@ def cleanup_stale_sessions(timeout_minutes=None):
             status_abandoned = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='abandoned'")
 
         # Находим все активные сессии, у которых LAST_ACTIVITY_AT старше timeout_minutes
-        # Используем интервал в минутах для Oracle
         stale_sessions = db.fetch_all(
             f"""SELECT GS.ID, GS.USER_ID, GA.ID as ATTEMPT_ID
                 FROM GAME_SESSIONS GS
@@ -245,7 +265,6 @@ def read_clob(value):
             return result if result else ""
         except Exception as e:
             print(f"Error reading CLOB: {e}")
-            # Вместо повторных попыток, сразу возвращаем пустую строку
             return ""
 
     # В остальных случаях просто преобразуем в строку
@@ -390,6 +409,105 @@ def check_win_condition(flat, target_flat):
 
 
 # ================================================================
+# ФУНКЦИИ ПЕРЕМЕШИВАНИЯ
+# ================================================================
+
+def shuffle_board(flat_board, grid_size, moves_count):
+    """
+    Перемешивает доску, выполняя случайные допустимые ходы.
+
+    Args:
+        flat_board: плоский список с состоянием доски
+        grid_size: размер сетки
+        moves_count: количество ходов для перемешивания
+
+    Returns:
+        новое перемешанное состояние (плоский список)
+    """
+    # Создаем копию доски для перемешивания
+    board = flat_board.copy()
+    n = grid_size
+
+    for _ in range(moves_count):
+        # Находим позицию пустой клетки (0)
+        try:
+            empty_pos = board.index(0)
+        except ValueError:
+            # Если нет пустой клетки, создаем её в конце
+            board[-1] = 0
+            empty_pos = n * n - 1
+
+        # Находим возможные ходы (соседние клетки)
+        possible_moves = []
+
+        # Вверх
+        if empty_pos >= n:
+            possible_moves.append(empty_pos - n)
+        # Вниз
+        if empty_pos < n * n - n:
+            possible_moves.append(empty_pos + n)
+        # Влево
+        if empty_pos % n != 0:
+            possible_moves.append(empty_pos - 1)
+        # Вправо
+        if empty_pos % n != n - 1:
+            possible_moves.append(empty_pos + 1)
+
+        if possible_moves:
+            # Выбираем случайный ход
+            move_pos = random.choice(possible_moves)
+            # Меняем местами пустую клетку с выбранной
+            board[empty_pos], board[move_pos] = board[move_pos], board[empty_pos]
+
+    return board
+
+
+def shuffle_board_with_seed(flat_board, grid_size, difficulty, seed=None):
+    """
+    Перемешивает доску с использованием seed для воспроизводимости.
+
+    Args:
+        flat_board: плоский список с состоянием доски
+        grid_size: размер сетки
+        difficulty: уровень сложности ('Easy', 'Medium', 'Hard')
+        seed: опциональный seed для random
+
+    Returns:
+        перемешанное состояние и количество сделанных ходов
+    """
+    # Определяем количество ходов в зависимости от сложности
+    moves_count = SHUFFLE_MOVES.get(difficulty, 50)
+
+    # Учитываем размер поля: для больших полей нужно больше ходов
+    multiplier = SIZE_MULTIPLIERS.get(grid_size, 1)
+    moves_count = moves_count * multiplier
+
+    # Устанавливаем seed для воспроизводимости
+    if seed:
+        random.seed(seed)
+
+    # Перемешиваем
+    shuffled = shuffle_board(flat_board, grid_size, moves_count)
+
+    # Сбрасываем seed
+    if seed:
+        random.seed()
+
+    return shuffled, moves_count
+
+
+def verify_shuffled(flat_board, target_flat):
+    """Проверяет, что поле не совпадает с целевым состоянием"""
+    return flat_board != target_flat
+
+
+def count_misplaced_tiles(flat_board, target_flat):
+    """Считает количество неправильно расположенных плиток"""
+    return sum(1 for i, val in enumerate(flat_board)
+               if val != 0 and val != target_flat[i])
+
+
+# ================================================================
 # АВТОРИЗАЦИЯ
 # ================================================================
 
@@ -499,7 +617,7 @@ def index():
 
 
 # ================================================================
-# ИГРА -- ЗАПУСК
+# ИГРА -- ЗАПУСК (ОБНОВЛЕННАЯ ВЕРСИЯ С ПЕРЕМЕШИВАНИЕМ)
 # ================================================================
 
 @app.route("/game/start/<int:puzzle_id>")
@@ -524,9 +642,11 @@ def start_game(puzzle_id):
 
     user_id = get_current_user_id()
 
+    # Получаем информацию о пазле, включая уровень сложности
     puzzle = db.fetch_one(
-        """SELECT PZ.ID, PS.GRID_SIZE, DL.SHUFFLE_MOVES,
-                  PZ.INITIAL_STATE, PZ.TARGET_STATE, PS.DEFAULT_TIME_LIMIT
+        """SELECT PZ.ID, PS.GRID_SIZE, DL.NAME AS DIFFICULTY_NAME, DL.SHUFFLE_MOVES,
+                  PZ.INITIAL_STATE, PZ.TARGET_STATE, PS.DEFAULT_TIME_LIMIT,
+                  PZ.SEED
            FROM PUZZLES PZ
            JOIN PUZZLE_SIZES PS ON PZ.PUZZLE_SIZE_ID = PS.ID
            JOIN DIFFICULTY_LEVELS DL ON PZ.DIFFICULTY_ID = DL.ID
@@ -537,48 +657,72 @@ def start_game(puzzle_id):
         return redirect(url_for("index"))
 
     grid_size = puzzle["grid_size"]
+    difficulty_name = puzzle["difficulty_name"]
+    puzzle_seed = puzzle["seed"]
 
-    init_json = read_clob(puzzle["initial_state"])
-    tgt_json = read_clob(puzzle["target_state"])
+    # Читаем целевое состояние (решенное)
+    target_json = read_clob(puzzle["target_state"])
 
     try:
-        init_data = json.loads(init_json)
-        tgt_data = json.loads(tgt_json)
+        target_data = json.loads(target_json)
     except json.JSONDecodeError as e:
         print(f"JSON decode error: {e}")
         return redirect(url_for("index"))
 
-    if init_data and len(init_data) > 0 and isinstance(init_data[0], list):
-        init_flat = []
-        for row in init_data:
-            init_flat.extend(row)
+    # Преобразуем целевое состояние в плоский список
+    if target_data and len(target_data) > 0 and isinstance(target_data[0], list):
+        target_flat = []
+        for row in target_data:
+            target_flat.extend(row)
     else:
-        init_flat = init_data
+        target_flat = target_data
 
-    if tgt_data and len(tgt_data) > 0 and isinstance(tgt_data[0], list):
-        tgt_flat = []
-        for row in tgt_data:
-            tgt_flat.extend(row)
-    else:
-        tgt_flat = tgt_data
+    # СОЗДАЕМ НАЧАЛЬНОЕ СОСТОЯНИЕ ПУТЕМ ПЕРЕМЕШИВАНИЯ ЦЕЛЕВОГО
+    # Используем seed пазла + timestamp для уникальности каждой игры
+    game_seed = f"{puzzle_seed}_{int(time.time())}"
 
-    misplaced, manhattan, correct = compute_metrics(init_flat, tgt_flat, grid_size)
+    shuffled_flat, moves_done = shuffle_board_with_seed(
+        target_flat,
+        grid_size,
+        difficulty_name,
+        seed=game_seed
+    )
 
+    # Проверяем, что поле действительно перемешано
+    if not verify_shuffled(shuffled_flat, target_flat):
+        # Если не перемешалось (маловероятно), делаем еще одну попытку
+        shuffled_flat, moves_done = shuffle_board_with_seed(
+            target_flat,
+            grid_size,
+            difficulty_name,
+            seed=f"{game_seed}_2"
+        )
+
+    # Преобразуем перемешанное состояние в JSON
+    shuffled_json = json.dumps(shuffled_flat)
+
+    # Вычисляем метрики для перемешанного состояния
+    misplaced, manhattan, correct = compute_metrics(shuffled_flat, target_flat, grid_size)
+
+    # Получаем статус 'active'
     status_active_row = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='active'")
     if not status_active_row:
         db.execute_query("INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'active')")
         status_active_row = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='active'")
     status_active = status_active_row["id"]
 
+    # Получаем тип действия 'move'
     action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     if not action_move_row:
         db.execute_query("INSERT INTO ACTION_TYPES (ID, NAME) VALUES (SEQ_ACTION_TYPES.NEXTVAL, 'move')")
         action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     action_move = action_move_row["id"]
 
+    # Создаем токен сессии
     timestamp_row = db.fetch_one("SELECT TO_CHAR(SYSDATE, 'YYYYMMDDHH24MISS') AS T FROM DUAL")
     token = f"{user_id}_{puzzle_id}_{timestamp_row['t']}"
 
+    # Создаем игровую сессию
     db.execute_query(
         """INSERT INTO GAME_SESSIONS
                (ID, USER_ID, PUZZLE_ID, STATUS_ID, SESSION_TOKEN,
@@ -588,6 +732,7 @@ def start_game(puzzle_id):
         [user_id, puzzle_id, status_active, token]
     )
 
+    # Получаем ID сессии
     gs = db.fetch_one("SELECT ID FROM GAME_SESSIONS WHERE SESSION_TOKEN=:1", [token])
     if not gs:
         gs = db.fetch_one(
@@ -596,6 +741,7 @@ def start_game(puzzle_id):
         )
     gs_id = gs["id"]
 
+    # Создаем игровую попытку с ПЕРЕМЕШАННЫМ состоянием
     db.execute_query(
         """INSERT INTO GAME_ATTEMPTS
                (ID, SESSION_ID, USER_ID, PUZZLE_ID, GAME_MODE, CURRENT_STATE,
@@ -604,10 +750,11 @@ def start_game(puzzle_id):
                 UNDO_POINTER, STATUS_ID, STARTED_AT)
            VALUES (SEQ_GAME_ATTEMPTS.NEXTVAL, :1, :2, :3, 'numbers', :4,
                    :5, :6, :7, :8, 0, :9, SYSTIMESTAMP)""",
-        [gs_id, user_id, puzzle_id, init_json,
+        [gs_id, user_id, puzzle_id, shuffled_json,
          misplaced, manhattan, misplaced, manhattan, status_active]
     )
 
+    # Получаем ID попытки
     ga = db.fetch_one("SELECT ID FROM GAME_ATTEMPTS WHERE SESSION_ID=:1 AND ROWNUM=1", [gs_id])
     if not ga:
         ga = db.fetch_one(
@@ -616,23 +763,81 @@ def start_game(puzzle_id):
         )
     ga_id = ga["id"]
 
+    # Сохраняем начальное состояние как первый шаг
     db.execute_query(
         """INSERT INTO GAME_STEPS
                (ID, SESSION_ID, ATTEMPT_ID, ACTION_ID, STATE_AFTER,
                 IS_ACTUAL, IS_IMPORT, IS_MARK, STEP_INDEX, STEP_TIME)
            VALUES (SEQ_GAME_STEPS.NEXTVAL, :1, :2, :3, :4,
                    1, 0, 0, 0, SYSDATE)""",
-        [gs_id, ga_id, action_move, init_json]
+        [gs_id, ga_id, action_move, shuffled_json]
     )
 
+    # Обновляем счетчик игр пользователя
     db.execute_query(
         "UPDATE USERS SET GAMES_COUNT = GAMES_COUNT + 1, "
         "FIRST_GAME_DATE = NVL(FIRST_GAME_DATE, SYSDATE) WHERE ID = :1",
         [user_id]
     )
 
+    # Сохраняем ID сессии в Flask session
     session["game_session_id"] = gs_id
+
+    # Логируем информацию о перемешивании
+    misplaced_count = count_misplaced_tiles(shuffled_flat, target_flat)
+    print(f"Game started: puzzle_id={puzzle_id}, difficulty={difficulty_name}, "
+          f"grid_size={grid_size}, moves_done={moves_done}, "
+          f"misplaced_tiles={misplaced_count}, seed={game_seed}")
+
     return redirect(url_for("game"))
+
+
+# ================================================================
+# ИГРА -- ПЕРЕЗАПУСК
+# ================================================================
+
+@app.route("/game/restart", methods=["POST"])
+def restart_game():
+    """Перезапускает текущую игру с тем же пазлом, но новым перемешиванием"""
+    if not get_current_user_id():
+        return jsonify({"error": "Не авторизован"}), 401
+
+    gsid = get_active_session_id()
+    if not gsid:
+        return jsonify({"error": "Нет активной игровой сессии"}), 400
+
+    try:
+        # Получаем ID пазла из текущей сессии
+        puzzle_data = db.fetch_one(
+            "SELECT PUZZLE_ID FROM GAME_SESSIONS WHERE ID = :1",
+            [gsid]
+        )
+
+        if not puzzle_data:
+            return jsonify({"error": "Сессия не найдена"}), 404
+
+        puzzle_id = puzzle_data["puzzle_id"]
+
+        # Завершаем текущую сессию
+        status_abandoned = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='abandoned'")
+        if status_abandoned:
+            db.execute_query(
+                "UPDATE GAME_ATTEMPTS SET STATUS_ID = :1, FINISHED_AT = SYSTIMESTAMP WHERE SESSION_ID = :2",
+                [status_abandoned["id"], gsid]
+            )
+            db.execute_query(
+                "UPDATE GAME_SESSIONS SET STATUS_ID = :1, END_TIME = SYSDATE WHERE ID = :2",
+                [status_abandoned["id"], gsid]
+            )
+
+        session.pop("game_session_id", None)
+
+        # Запускаем новую игру с тем же пазлом
+        return redirect(url_for("start_game", puzzle_id=puzzle_id))
+
+    except Exception as e:
+        print(f"RESTART error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 
 # ================================================================
@@ -706,7 +911,7 @@ def game():
 
     active = {
         "session_id": gsid,
-        "id": attempt["id"],  # Добавляем ID попытки
+        "id": attempt["id"],
         "grid_size": grid_size,
         "difficulty": attempt["difficulty"],
         "current_step": attempt["undo_pointer"],
@@ -714,8 +919,8 @@ def game():
         "manhattan_distance": manhattan,
         "progress_pct": pct,
         "initial_manhattan": attempt["initial_manhattan_distance"],
-        "time_limit_seconds": time_limit_seconds,  # Добавляем лимит времени в секундах
-        "elapsed_seconds": elapsed_seconds,  # Добавляем прошедшее время
+        "time_limit_seconds": time_limit_seconds,
+        "elapsed_seconds": elapsed_seconds,
     }
 
     return render_template(
@@ -929,7 +1134,6 @@ def undo_move():
         prev_idx = current_pointer - 1
 
         # ПОЛУЧАЕМ ПРЕДЫДУЩЕЕ СОСТОЯНИЕ КАК СТРОКУ (не CLOB)
-        # Используем TO_CHAR для преобразования CLOB в строку на стороне БД
         prev_state_row = db.fetch_one("""
             SELECT TO_CHAR(STATE_AFTER) as state_str 
             FROM GAME_STEPS 
