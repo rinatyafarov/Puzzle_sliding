@@ -10,18 +10,14 @@ app = Flask(__name__)
 app.secret_key = "sliding_puzzle_secret_key"
 app.config['SESSION_TIMEOUT_MINUTES'] = 30  # Таймаут сессии в минутах
 
-# ================================================================
-# КОНФИГУРАЦИЯ ПЕРЕМЕШИВАНИЯ
-# ================================================================
 
-# Количество ходов для перемешивания в зависимости от сложности
 SHUFFLE_MOVES = {
     'Easy': 50,
     'Medium': 200,
     'Hard': 500
 }
 
-# Множители для разных размеров поля
+
 SIZE_MULTIPLIERS = {
     3: 1,  # 3x3 - базовый
     4: 2,  # 4x4 - в 2 раза больше ходов
@@ -31,9 +27,7 @@ SIZE_MULTIPLIERS = {
 }
 
 
-# ================================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# ================================================================
+
 
 def get_current_user_id():
     return session.get("user_id")
@@ -82,13 +76,13 @@ def cleanup_stale_sessions(timeout_minutes=None):
             "SELECT ID FROM GAME_STATUSES WHERE NAME='abandoned'"
         )
         if not status_abandoned:
-            # Создаем, если не существует
+
             db.execute_query(
                 "INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'abandoned')"
             )
             status_abandoned = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='abandoned'")
 
-        # Находим все активные сессии, у которых LAST_ACTIVITY_AT старше timeout_minutes
+
         stale_sessions = db.fetch_all(
             f"""SELECT GS.ID, GS.USER_ID, GA.ID as ATTEMPT_ID
                 FROM GAME_SESSIONS GS
@@ -100,7 +94,7 @@ def cleanup_stale_sessions(timeout_minutes=None):
         )
 
         for session_data in stale_sessions:
-            # Завершаем попытку
+
             db.execute_query(
                 """UPDATE GAME_ATTEMPTS 
                    SET STATUS_ID = :1, FINISHED_AT = SYSTIMESTAMP 
@@ -108,7 +102,7 @@ def cleanup_stale_sessions(timeout_minutes=None):
                 [status_abandoned["id"], session_data["attempt_id"]]
             )
 
-            # Завершаем сессию
+
             db.execute_query(
                 """UPDATE GAME_SESSIONS 
                    SET STATUS_ID = :1, END_TIME = SYSDATE 
@@ -116,12 +110,12 @@ def cleanup_stale_sessions(timeout_minutes=None):
                 [status_abandoned["id"], session_data["id"]]
             )
 
-            # Если это текущая сессия пользователя, очищаем её из сессии Flask
+
             current_session_id = get_active_session_id()
             if current_session_id == session_data["id"]:
                 session.pop("game_session_id", None)
 
-            # Логируем событие
+
             try:
                 db.execute_query(
                     """INSERT INTO LOGS (ID, LOG_DATE, SESSION_ID, LOG_TYPE, PROCEDURE_NAME, MESSAGE)
@@ -129,7 +123,7 @@ def cleanup_stale_sessions(timeout_minutes=None):
                     [session_data["id"], f"Session auto-closed after {timeout_minutes} minutes of inactivity"]
                 )
             except:
-                pass  # Игнорируем ошибки логирования
+                pass
 
         if stale_sessions:
             print(f"Auto-closed {len(stale_sessions)} stale sessions")
@@ -142,7 +136,7 @@ def check_current_session_valid():
     """Проверяет, не истекла ли текущая активная сессия по времени"""
     gsid = get_active_session_id()
     if not gsid:
-        return True  # Нет активной сессии - ок
+        return True
 
     try:
         session_data = db.fetch_one(
@@ -154,25 +148,25 @@ def check_current_session_valid():
         )
 
         if not session_data:
-            # Сессия не найдена
+
             session.pop("game_session_id", None)
             return False
 
         if session_data["status_name"] != 'active':
-            # Сессия уже не активна
+
             session.pop("game_session_id", None)
             return False
 
-        # Проверяем время последней активности
+
         last_activity = session_data["last_activity_at"]
         if hasattr(last_activity, 'timestamp'):
-            # Если это datetime объект
+
             timeout_minutes = app.config['SESSION_TIMEOUT_MINUTES']
             if datetime.now() - last_activity > timedelta(minutes=timeout_minutes):
-                # Завершаем сессию
+
                 status_abandoned = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='abandoned'")
                 if status_abandoned:
-                    # Получаем ID попытки
+
                     attempt = db.fetch_one(
                         "SELECT ID FROM GAME_ATTEMPTS WHERE SESSION_ID = :1 AND STATUS_ID = (SELECT ID FROM GAME_STATUSES WHERE NAME='active')",
                         [gsid]
@@ -200,12 +194,12 @@ def check_current_session_valid():
 @app.before_request
 def before_request():
     """Выполняется перед каждым запросом"""
-    # Очищаем старые сессии (раз в час примерно)
+
     if not hasattr(app, 'last_cleanup') or time.time() - app.last_cleanup > 3600:
         cleanup_stale_sessions()
         app.last_cleanup = time.time()
 
-    # Проверяем валидность текущей сессии
+
     if get_current_user_id() and get_active_session_id():
         if not check_current_session_valid():
             # Если сессия невалидна, редиректим на главную
@@ -248,27 +242,27 @@ def read_clob(value):
     if value is None:
         return ""
 
-    # Если это уже строка
+
     if isinstance(value, str):
         return value
 
-    # Если это CLOB объект
+
     if hasattr(value, "read"):
         try:
-            # Пробуем прочитать CLOB
+
             result = value.read()
-            # Пробуем закрыть CLOB
+
             try:
                 value.close()
             except:
                 pass
-            # Если результат - байты, декодируем
+
             if isinstance(result, bytes):
                 result = result.decode('utf-8')
             return result if result else ""
         except Exception as e:
             print(f"Error reading CLOB: {e}")
-            # Пробуем альтернативный метод
+
             try:
                 if hasattr(value, 'read'):
                     value = str(value)
@@ -277,7 +271,7 @@ def read_clob(value):
                 pass
             return ""
 
-    # В остальных случаях просто преобразуем в строку
+
     try:
         return str(value)
     except:
@@ -292,7 +286,7 @@ def parse_board(state_str, grid_size):
     if not s:
         return [], []
 
-    # Убираем лишние кавычки если они есть
+
     if s.startswith('"') and s.endswith('"'):
         s = s[1:-1]
 
@@ -302,15 +296,15 @@ def parse_board(state_str, grid_size):
         # Если не JSON, пробуем CSV
         return parse_board_csv(s, grid_size)
 
-    # Проверяем формат данных
+
     if data and len(data) > 0 and isinstance(data[0], list):
-        # Это двумерный массив
+
         flat = []
         for row in data:
             flat.extend(row)
         return data, flat
     else:
-        # Это плоский список
+
         flat = data
         expected_length = grid_size * grid_size
         if len(flat) != expected_length:
@@ -367,7 +361,7 @@ def compute_metrics(flat, target_flat, grid_size):
     correct = 0
     n = grid_size
 
-    # Убеждаемся, что target_flat - плоский список
+
     if target_flat and len(target_flat) > 0 and isinstance(target_flat[0], list):
         new_target = []
         for row in target_flat:
@@ -418,9 +412,7 @@ def check_win_condition(flat, target_flat):
     return True
 
 
-# ================================================================
-# ФУНКЦИИ ПЕРЕМЕШИВАНИЯ
-# ================================================================
+
 
 def shuffle_board(flat_board, grid_size, moves_count):
     """
@@ -434,32 +426,32 @@ def shuffle_board(flat_board, grid_size, moves_count):
     Returns:
         новое перемешанное состояние (плоский список)
     """
-    # Создаем копию доски для перемешивания
+
     board = flat_board.copy()
     n = grid_size
 
     for _ in range(moves_count):
-        # Находим позицию пустой клетки (0)
+
         try:
             empty_pos = board.index(0)
         except ValueError:
-            # Если нет пустой клетки, создаем её в конце
+
             board[-1] = 0
             empty_pos = n * n - 1
 
-        # Находим возможные ходы (соседние клетки)
+
         possible_moves = []
 
-        # Вверх
+
         if empty_pos >= n:
             possible_moves.append(empty_pos - n)
-        # Вниз
+
         if empty_pos < n * n - n:
             possible_moves.append(empty_pos + n)
-        # Влево
+
         if empty_pos % n != 0:
             possible_moves.append(empty_pos - 1)
-        # Вправо
+
         if empty_pos % n != n - 1:
             possible_moves.append(empty_pos + 1)
 
@@ -485,21 +477,21 @@ def shuffle_board_with_seed(flat_board, grid_size, difficulty, seed=None):
     Returns:
         перемешанное состояние и количество сделанных ходов
     """
-    # Определяем количество ходов в зависимости от сложности
+
     moves_count = SHUFFLE_MOVES.get(difficulty, 50)
 
-    # Учитываем размер поля: для больших полей нужно больше ходов
+
     multiplier = SIZE_MULTIPLIERS.get(grid_size, 1)
     moves_count = moves_count * multiplier
 
-    # Устанавливаем seed для воспроизводимости
+
     if seed:
         random.seed(seed)
 
-    # Перемешиваем
+
     shuffled = shuffle_board(flat_board, grid_size, moves_count)
 
-    # Сбрасываем seed
+
     if seed:
         random.seed()
 
@@ -517,9 +509,7 @@ def count_misplaced_tiles(flat_board, target_flat):
                if val != 0 and val != target_flat[i])
 
 
-# ================================================================
-# АВТОРИЗАЦИЯ
-# ================================================================
+
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -546,7 +536,7 @@ def login():
             session["user_id"] = user["id"]
             session["username"] = user["username"]
 
-            # Восстановить активную сессию если есть и она не устарела (менее 30 минут назад)
+
             active = db.fetch_one(
                 """SELECT GS.ID 
                    FROM GAME_SESSIONS GS
@@ -569,9 +559,7 @@ def logout():
     return redirect(url_for("login"))
 
 
-# ================================================================
-# ГЛАВНАЯ
-# ================================================================
+
 
 @app.route("/")
 def index():
@@ -604,7 +592,7 @@ def index():
     active_game = None
     gsid = get_active_session_id()
     if gsid:
-        # Проверяем, что сессия действительно активна
+
         active_check = db.fetch_one(
             """SELECT GS.ID 
                FROM GAME_SESSIONS GS
@@ -626,9 +614,6 @@ def index():
     )
 
 
-# ================================================================
-# ИГРА -- ЗАПУСК
-# ================================================================
 
 @app.route("/game/start/<int:puzzle_id>")
 def start_game(puzzle_id):
@@ -637,7 +622,7 @@ def start_game(puzzle_id):
 
     gsid = get_active_session_id()
     if gsid:
-        # Проверяем, активна ли существующая сессия
+
         active_check = db.fetch_one(
             """SELECT GS.ID 
                FROM GAME_SESSIONS GS
@@ -652,7 +637,7 @@ def start_game(puzzle_id):
 
     user_id = get_current_user_id()
 
-    # Получаем информацию о пазле, включая уровень сложности
+
     puzzle = db.fetch_one(
         """SELECT PZ.ID, PS.GRID_SIZE, DL.NAME AS DIFFICULTY_NAME, DL.SHUFFLE_MOVES,
                   PZ.INITIAL_STATE, PZ.TARGET_STATE, PS.DEFAULT_TIME_LIMIT,
@@ -670,7 +655,7 @@ def start_game(puzzle_id):
     difficulty_name = puzzle["difficulty_name"]
     puzzle_seed = puzzle["seed"]
 
-    # Читаем целевое состояние (решенное)
+
     target_json = read_clob(puzzle["target_state"])
 
     try:
@@ -679,7 +664,7 @@ def start_game(puzzle_id):
         print(f"JSON decode error: {e}")
         return redirect(url_for("index"))
 
-    # Преобразуем целевое состояние в плоский список
+
     if target_data and len(target_data) > 0 and isinstance(target_data[0], list):
         target_flat = []
         for row in target_data:
@@ -687,8 +672,7 @@ def start_game(puzzle_id):
     else:
         target_flat = target_data
 
-    # СОЗДАЕМ НАЧАЛЬНОЕ СОСТОЯНИЕ ПУТЕМ ПЕРЕМЕШИВАНИЯ ЦЕЛЕВОГО
-    # Используем seed пазла + timestamp для уникальности каждой игры
+
     game_seed = f"{puzzle_seed}_{int(time.time())}"
 
     shuffled_flat, moves_done = shuffle_board_with_seed(
@@ -698,9 +682,9 @@ def start_game(puzzle_id):
         seed=game_seed
     )
 
-    # Проверяем, что поле действительно перемешано
+
     if not verify_shuffled(shuffled_flat, target_flat):
-        # Если не перемешалось (маловероятно), делаем еще одну попытку
+
         shuffled_flat, moves_done = shuffle_board_with_seed(
             target_flat,
             grid_size,
@@ -708,31 +692,31 @@ def start_game(puzzle_id):
             seed=f"{game_seed}_2"
         )
 
-    # Преобразуем перемешанное состояние в JSON
+
     shuffled_json = json.dumps(shuffled_flat)
 
-    # Вычисляем метрики для перемешанного состояния
+
     misplaced, manhattan, correct = compute_metrics(shuffled_flat, target_flat, grid_size)
 
-    # Получаем статус 'active'
+
     status_active_row = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='active'")
     if not status_active_row:
         db.execute_query("INSERT INTO GAME_STATUSES (ID, NAME) VALUES (SEQ_GAME_STATUSES.NEXTVAL, 'active')")
         status_active_row = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='active'")
     status_active = status_active_row["id"]
 
-    # Получаем тип действия 'move'
+
     action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     if not action_move_row:
         db.execute_query("INSERT INTO ACTION_TYPES (ID, NAME) VALUES (SEQ_ACTION_TYPES.NEXTVAL, 'move')")
         action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     action_move = action_move_row["id"]
 
-    # Создаем токен сессии
+
     timestamp_row = db.fetch_one("SELECT TO_CHAR(SYSDATE, 'YYYYMMDDHH24MISS') AS T FROM DUAL")
     token = f"{user_id}_{puzzle_id}_{timestamp_row['t']}"
 
-    # Создаем игровую сессию
+
     db.execute_query(
         """INSERT INTO GAME_SESSIONS
                (ID, USER_ID, PUZZLE_ID, STATUS_ID, SESSION_TOKEN,
@@ -742,7 +726,7 @@ def start_game(puzzle_id):
         [user_id, puzzle_id, status_active, token]
     )
 
-    # Получаем ID сессии
+
     gs = db.fetch_one("SELECT ID FROM GAME_SESSIONS WHERE SESSION_TOKEN=:1", [token])
     if not gs:
         gs = db.fetch_one(
@@ -751,7 +735,7 @@ def start_game(puzzle_id):
         )
     gs_id = gs["id"]
 
-    # Создаем игровую попытку с ПЕРЕМЕШАННЫМ состоянием
+
     db.execute_query(
         """INSERT INTO GAME_ATTEMPTS
                (ID, SESSION_ID, USER_ID, PUZZLE_ID, GAME_MODE, CURRENT_STATE,
@@ -764,7 +748,7 @@ def start_game(puzzle_id):
          misplaced, manhattan, misplaced, manhattan, status_active]
     )
 
-    # Получаем ID попытки
+
     ga = db.fetch_one("SELECT ID FROM GAME_ATTEMPTS WHERE SESSION_ID=:1 AND ROWNUM=1", [gs_id])
     if not ga:
         ga = db.fetch_one(
@@ -773,14 +757,14 @@ def start_game(puzzle_id):
         )
     ga_id = ga["id"]
 
-    # Проверяем, существует ли уже шаг с индексом 0
+
     existing_step = db.fetch_one(
         "SELECT ID FROM GAME_STEPS WHERE ATTEMPT_ID = :1 AND STEP_INDEX = 0",
         [ga_id]
     )
 
     if not existing_step:
-        # Сохраняем начальное состояние как первый шаг (индекс 0)
+
         db.execute_query(
             """INSERT INTO GAME_STEPS
                    (ID, SESSION_ID, ATTEMPT_ID, ACTION_ID, STATE_AFTER,
@@ -793,17 +777,17 @@ def start_game(puzzle_id):
     else:
         print(f"Step 0 already exists for attempt {ga_id}")
 
-    # Обновляем счетчик игр пользователя
+
     db.execute_query(
         "UPDATE USERS SET GAMES_COUNT = GAMES_COUNT + 1, "
         "FIRST_GAME_DATE = NVL(FIRST_GAME_DATE, SYSDATE) WHERE ID = :1",
         [user_id]
     )
 
-    # Сохраняем ID сессии в Flask session
+
     session["game_session_id"] = gs_id
 
-    # Логируем информацию о перемешивании
+
     misplaced_count = count_misplaced_tiles(shuffled_flat, target_flat)
     print(f"Game started: puzzle_id={puzzle_id}, difficulty={difficulty_name}, "
           f"grid_size={grid_size}, moves_done={moves_done}, "
@@ -812,9 +796,7 @@ def start_game(puzzle_id):
     return redirect(url_for("game"))
 
 
-# ================================================================
-# ИГРА -- СТРАНИЦА
-# ================================================================
+
 
 @app.route("/game")
 def game():
@@ -825,7 +807,7 @@ def game():
     if not gsid:
         return redirect(url_for("index"))
 
-    # Дополнительная проверка активности сессии
+
     if not check_current_session_valid():
         return redirect(url_for("index"))
 
@@ -840,18 +822,18 @@ def game():
     misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
     pct = progress_pct(attempt["initial_manhattan_distance"], manhattan)
 
-    # Получаем лимит времени из таблицы PUZZLE_SIZES
+
     time_limit_row = db.fetch_one(
         "SELECT DEFAULT_TIME_LIMIT FROM PUZZLE_SIZES WHERE GRID_SIZE = :1",
         [grid_size]
     )
 
-    # Преобразуем INTERVAL в секунды
+
     time_limit_seconds = 0
     if time_limit_row and time_limit_row["default_time_limit"]:
-        # Парсим INTERVAL DAY TO SECOND
+
         time_limit_str = str(time_limit_row["default_time_limit"])
-        # Пример формата: "+08 00:00:00" или "8 0:0:0"
+
         import re
         match = re.search(r'(\d+)\s+(\d+):(\d+):(\d+)', time_limit_str)
         if match:
@@ -861,10 +843,10 @@ def game():
             seconds = int(match.group(4))
             time_limit_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds
         else:
-            # Если не удалось распарсить, ставим значение по умолчанию
-            time_limit_seconds = grid_size * 60  # примерно N минут
 
-    # Получаем время начала игры
+            time_limit_seconds = grid_size * 60
+
+
     start_time_row = db.fetch_one(
         "SELECT STARTED_AT FROM GAME_ATTEMPTS WHERE ID = :1",
         [attempt["id"]]
@@ -872,13 +854,13 @@ def game():
 
     elapsed_seconds = 0
     if start_time_row and start_time_row["started_at"]:
-        # Вычисляем прошедшее время в секундах
+
         start_time = start_time_row["started_at"]
         if hasattr(start_time, 'timestamp'):
-            # Если это datetime объект
+
             elapsed_seconds = int((datetime.now() - start_time).total_seconds())
         else:
-            # Если это строка или другой формат
+
             elapsed_seconds = 0
 
     active = {
@@ -903,16 +885,13 @@ def game():
     )
 
 
-# ================================================================
-# ИГРА -- ХОД
-# ================================================================
 
 @app.route("/game/move", methods=["POST"])
 def make_move():
     if not get_current_user_id():
         return jsonify({"error": "Не авторизован"}), 401
 
-    # Проверяем валидность сессии
+
     if not check_current_session_valid():
         return jsonify({"error": "Сессия истекла по времени"}), 401
 
@@ -966,14 +945,14 @@ def make_move():
         action_move_row = db.fetch_one("SELECT ID FROM ACTION_TYPES WHERE NAME='move'")
     action_move = action_move_row["id"]
 
-    # Проверяем, существует ли уже шаг с таким индексом
+
     existing_step = db.fetch_one(
         "SELECT ID FROM GAME_STEPS WHERE ATTEMPT_ID = :1 AND STEP_INDEX = :2",
         [attempt["id"], next_idx]
     )
 
     if existing_step:
-        # Если шаг существует, просто обновляем его
+
         db.execute_query(
             """UPDATE GAME_STEPS 
                SET STATE_AFTER = :1, IS_ACTUAL = 1, STEP_TIME = SYSDATE,
@@ -983,7 +962,7 @@ def make_move():
         )
         print(f"Updated existing step {next_idx}")
     else:
-        # Если шага нет, вставляем новый
+
         db.execute_query(
             """INSERT INTO GAME_STEPS
                (ID, SESSION_ID, ATTEMPT_ID, ACTION_ID, TILE_VALUE,
@@ -994,7 +973,7 @@ def make_move():
         )
         print(f"Inserted new step {next_idx}")
 
-    # Инвалидируем все шаги после текущего индекса
+
     db.execute_query(
         "UPDATE GAME_STEPS SET IS_ACTUAL = 0 WHERE ATTEMPT_ID = :1 AND STEP_INDEX > :2",
         [attempt["id"], next_idx]
@@ -1008,7 +987,7 @@ def make_move():
         [new_state_json, misplaced, manhattan, next_idx, attempt["id"]]
     )
 
-    # Обновляем время последней активности
+
     db.execute_query(
         "UPDATE GAME_SESSIONS SET STEPS_COUNT = STEPS_COUNT + 1, LAST_ACTIVITY_AT = SYSTIMESTAMP WHERE ID = :1",
         [gsid]
@@ -1043,7 +1022,7 @@ def make_move():
             "manhattan": 0
         })
 
-    # Проверяем, есть ли шаги для REDO
+
     redo_check = db.fetch_one(
         "SELECT COUNT(*) AS CNT FROM GAME_STEPS WHERE ATTEMPT_ID = :1 AND STEP_INDEX > :2",
         [attempt["id"], next_idx]
@@ -1062,9 +1041,7 @@ def make_move():
     })
 
 
-# ================================================================
-# ИГРА -- UNDO
-# ================================================================
+
 
 @app.route("/game/undo", methods=["POST"])
 def undo_move():
@@ -1072,7 +1049,7 @@ def undo_move():
     if not get_current_user_id():
         return jsonify({"error": "Не авторизован"}), 401
 
-    # Проверяем валидность сессии
+
     if not check_current_session_valid():
         return jsonify({"error": "Сессия истекла по времени"}), 401
 
@@ -1084,7 +1061,7 @@ def undo_move():
         return jsonify({"error": "Потеряно соединение с БД"}), 500
 
     try:
-        # Получаем данные игры
+
         game_data = db.fetch_one("""
             SELECT 
                 GA.ID as attempt_id,
@@ -1111,14 +1088,14 @@ def undo_move():
 
         print(f"Current undo_pointer: {current_pointer}")
 
-        # Проверяем, можно ли отменить ход
+
         if current_pointer <= 0:
             return jsonify({"error": "Нет ходов для отмены"}), 400
 
-        # Получаем предыдущее состояние
+
         prev_idx = current_pointer - 1
 
-        # Получаем состояние для предыдущего шага
+
         prev_state_row = db.fetch_one("""
             SELECT TO_CHAR(STATE_AFTER) as state_str 
             FROM GAME_STEPS 
@@ -1131,18 +1108,18 @@ def undo_move():
 
         prev_state_str = prev_state_row["state_str"]
 
-        # Проверяем, что состояние не пустое
+
         if not prev_state_str or prev_state_str.isspace():
             print(f"ERROR: Previous state is empty for attempt {attempt_id}, step {prev_idx}")
             return jsonify({"error": "Предыдущее состояние повреждено (пустое)"}), 500
 
-        # Преобразуем target_state в строку
+
         target_state_str = read_clob(target_state)
         if not target_state_str or target_state_str.isspace():
             print("ERROR: Target state is empty")
             return jsonify({"error": "Целевое состояние повреждено"}), 500
 
-        # Парсим состояния
+
         _, flat = parse_board(prev_state_str, grid_size)
         _, tgt_flat = parse_board(target_state_str, grid_size)
 
@@ -1154,10 +1131,10 @@ def undo_move():
             print("ERROR: Failed to parse target state")
             return jsonify({"error": "Ошибка парсинга целевого состояния"}), 500
 
-        # Вычисляем метрики для предыдущего состояния
+
         misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
 
-        # Обновляем состояние в БД
+
         db.execute_query(
             """UPDATE GAME_ATTEMPTS 
                SET CURRENT_STATE = :1, 
@@ -1168,13 +1145,13 @@ def undo_move():
             [prev_state_str, misplaced, manhattan, prev_idx, attempt_id]
         )
 
-        # Обновляем время активности сессии
+
         db.execute_query(
             "UPDATE GAME_SESSIONS SET LAST_ACTIVITY_AT = SYSTIMESTAMP WHERE ID = :1",
             [gsid]
         )
 
-        # Формируем доску для ответа
+
         board = []
         for r in range(grid_size):
             row = flat[r * grid_size:(r + 1) * grid_size]
@@ -1184,10 +1161,10 @@ def undo_move():
 
         print(f"Undo successful, new step: {prev_idx}")
 
-        # Проверяем, есть ли еще шаги для UNDO
+
         undo_available = prev_idx > 0
 
-        # Проверяем, есть ли шаги для REDO (шаги после текущего указателя)
+
         redo_check = db.fetch_one(
             "SELECT COUNT(*) AS CNT FROM GAME_STEPS WHERE ATTEMPT_ID = :1 AND STEP_INDEX > :2",
             [attempt_id, prev_idx]
@@ -1211,9 +1188,6 @@ def undo_move():
         return jsonify({"error": f"Ошибка: {str(e)}"}), 500
 
 
-# ================================================================
-# ИГРА -- REDO
-# ================================================================
 
 @app.route("/game/redo", methods=["POST"])
 def redo_move():
@@ -1221,7 +1195,7 @@ def redo_move():
     if not get_current_user_id():
         return jsonify({"error": "Не авторизован"}), 401
 
-    # Проверяем валидность сессии
+
     if not check_current_session_valid():
         return jsonify({"error": "Сессия истекла по времени"}), 401
 
@@ -1233,7 +1207,7 @@ def redo_move():
         return jsonify({"error": "Потеряно соединение с БД"}), 500
 
     try:
-        # Получаем данные игры - добавляем CURRENT_STATE для отладки
+
         game_data = db.fetch_one("""
             SELECT 
                 GA.ID as attempt_id,
@@ -1262,7 +1236,7 @@ def redo_move():
 
         next_idx = current_pointer + 1
 
-        # Проверяем, есть ли следующий шаг
+
         next_state_row = db.fetch_one("""
             SELECT TO_CHAR(STATE_AFTER) as state_str 
             FROM GAME_STEPS 
@@ -1279,13 +1253,13 @@ def redo_move():
             print(f"ERROR: Next state is empty for attempt {attempt_id}, step {next_idx}")
             return jsonify({"error": "Следующее состояние повреждено (пустое)"}), 500
 
-        # Преобразуем target_state в строку
+
         target_state_str = read_clob(target_state)
 
-        # Если target_state_str пустой или содержит только пробелы, пробуем получить его из PUZZLES еще раз
+
         if not target_state_str or target_state_str.isspace():
             print("WARNING: Target state is empty, trying to fetch again...")
-            # Пробуем получить целевое состояние напрямую из PUZZLES
+
             target_direct = db.fetch_one("""
                 SELECT TO_CHAR(TARGET_STATE) as target_str 
                 FROM PUZZLES PZ
@@ -1299,7 +1273,7 @@ def redo_move():
                 print("ERROR: Still cannot get target state")
                 return jsonify({"error": "Целевое состояние повреждено"}), 500
 
-        # Парсим состояния
+
         _, flat = parse_board(next_state_str, grid_size)
         _, tgt_flat = parse_board(target_state_str, grid_size)
 
@@ -1313,7 +1287,7 @@ def redo_move():
 
         misplaced, manhattan, _ = compute_metrics(flat, tgt_flat, grid_size)
 
-        # Обновляем состояние в БД
+
         db.execute_query(
             """UPDATE GAME_ATTEMPTS 
                SET CURRENT_STATE = :1, 
@@ -1329,7 +1303,7 @@ def redo_move():
             [gsid]
         )
 
-        # Проверяем, есть ли еще шаги для REDO
+
         has_more_row = db.fetch_one(
             "SELECT COUNT(*) AS CNT FROM GAME_STEPS WHERE ATTEMPT_ID = :1 AND STEP_INDEX > :2",
             [attempt_id, next_idx]
@@ -1362,16 +1336,13 @@ def redo_move():
         return jsonify({"error": f"Ошибка: {str(e)}"}), 500
 
 
-# ================================================================
-# ИГРА -- ПОДСКАЗКА
-# ================================================================
 
 @app.route("/game/hint", methods=["POST"])
 def get_hint():
     if not get_current_user_id():
         return jsonify({"error": "Не авторизован"}), 401
 
-    # Проверяем валидность сессии
+
     if not check_current_session_valid():
         return jsonify({"error": "Сессия истекла по времени"}), 401
 
@@ -1405,9 +1376,6 @@ def get_hint():
         return jsonify({"error": str(e)}), 500
 
 
-# ================================================================
-# ИГРА -- ЗАВЕРШИТЬ
-# ================================================================
 
 @app.route("/game/over", methods=["POST"])
 def game_over():
@@ -1416,7 +1384,7 @@ def game_over():
 
     gsid = get_active_session_id()
     if gsid:
-        # Проверяем, активна ли сессия
+
         active_check = db.fetch_one(
             """SELECT GS.ID 
                FROM GAME_SESSIONS GS
@@ -1446,9 +1414,6 @@ def game_over():
     return redirect(url_for("index"))
 
 
-# ================================================================
-# ИГРА -- ПЕРЕЗАПУСК
-# ================================================================
 
 @app.route("/game/restart", methods=["POST"])
 def restart_game():
@@ -1461,7 +1426,7 @@ def restart_game():
         return jsonify({"error": "Нет активной игровой сессии"}), 400
 
     try:
-        # Получаем ID пазла из текущей сессии
+
         puzzle_data = db.fetch_one(
             "SELECT PUZZLE_ID FROM GAME_SESSIONS WHERE ID = :1",
             [gsid]
@@ -1472,7 +1437,7 @@ def restart_game():
 
         puzzle_id = puzzle_data["puzzle_id"]
 
-        # Завершаем текущую сессию
+
         status_abandoned = db.fetch_one("SELECT ID FROM GAME_STATUSES WHERE NAME='abandoned'")
         if status_abandoned:
             db.execute_query(
@@ -1486,7 +1451,7 @@ def restart_game():
 
         session.pop("game_session_id", None)
 
-        # Запускаем новую игру с тем же пазлом
+
         return redirect(url_for("start_game", puzzle_id=puzzle_id))
 
     except Exception as e:
@@ -1494,9 +1459,6 @@ def restart_game():
         return jsonify({"error": str(e)}), 500
 
 
-# ================================================================
-# ДИАГНОСТИЧЕСКАЯ ФУНКЦИЯ
-# ================================================================
 
 @app.route("/game/diagnose", methods=["GET"])
 def diagnose_game():
@@ -1509,7 +1471,7 @@ def diagnose_game():
         return jsonify({"error": "Нет активной игровой сессии"}), 400
 
     try:
-        # Получаем информацию о попытке и пазле
+
         data = db.fetch_one("""
             SELECT 
                 GA.ID as attempt_id,
@@ -1527,7 +1489,7 @@ def diagnose_game():
             WHERE GA.SESSION_ID = :1 AND GST.NAME = 'active' AND ROWNUM = 1
         """, [gsid])
 
-        # Получаем все шаги
+
         steps = db.fetch_all("""
             SELECT STEP_INDEX, IS_ACTUAL, TILE_VALUE,
                    SUBSTR(TO_CHAR(STATE_AFTER), 1, 50) as state_preview
@@ -1552,20 +1514,17 @@ def diagnose_game():
         return jsonify({"error": str(e)}), 500
 
 
-# ================================================================
-# ТАБЛИЦА ЛИДЕРОВ (ОБНОВЛЕННАЯ С ФИЛЬТРАЦИЕЙ ПО РАЗМЕРУ)
-# ================================================================
 
 @app.route("/leaderboard")
 def leaderboard():
     if not get_current_user_id():
         return redirect(url_for("login"))
 
-    # Получаем параметр размера из запроса
+
     grid_size = request.args.get('size', type=int)
     sort_by = request.args.get('sort', 'success_rate')  # success_rate, best_time, best_steps
 
-    # Базовый запрос
+
     base_query = """
         SELECT U.ID, U.USERNAME,
                COUNT(DISTINCT GS.ID) AS TOTAL_GAMES,
@@ -1586,23 +1545,23 @@ def leaderboard():
 
     params = []
 
-    # Добавляем фильтр по размеру, если указан
+
     if grid_size:
         base_query += " AND PS.GRID_SIZE = :1"
         params.append(grid_size)
 
     base_query += " GROUP BY U.ID, U.USERNAME"
 
-    # Получаем основную статистику
+
     players = db.fetch_all(base_query, params if params else None)
 
-    # Для каждого игрока получаем дополнительную статистику по размерам
+
     for player in players:
         user_id = player["id"]
 
-        # Статистика по времени и ходам для конкретного размера (или для всех)
+
         if grid_size:
-            # Для конкретного размера
+
             stats = db.fetch_one("""
                 SELECT 
                     ROUND(AVG(CASE WHEN GST.NAME = 'solved'
@@ -1619,7 +1578,7 @@ def leaderboard():
                   AND PS.GRID_SIZE = :2
             """, [user_id, grid_size])
         else:
-            # Для всех размеров
+
             stats = db.fetch_one("""
                 SELECT 
                     ROUND(AVG(CASE WHEN GST.NAME = 'solved'
@@ -1636,7 +1595,7 @@ def leaderboard():
         player["best_steps"] = stats["best_steps"] if stats else None
         player["best_time_seconds"] = stats["best_time_seconds"] if stats else None
 
-    # Сортируем в зависимости от выбранного критерия
+
     if sort_by == 'best_time':
         players.sort(key=lambda x: (x["best_time_seconds"] is None, x["best_time_seconds"] or float('inf')))
     elif sort_by == 'best_steps':
@@ -1644,7 +1603,7 @@ def leaderboard():
     else:  # success_rate
         players.sort(key=lambda x: (-x["success_rate"], -x["solved_games"]))
 
-    # Получаем список всех доступных размеров для фильтра
+
     sizes = db.fetch_all(
         "SELECT GRID_SIZE FROM PUZZLE_SIZES ORDER BY GRID_SIZE"
     )
@@ -1659,9 +1618,6 @@ def leaderboard():
     )
 
 
-# ================================================================
-# API ДЛЯ ПОЛУЧЕНИЯ ТОП-10 ПО РАЗМЕРУ (для графиков)
-# ================================================================
 
 @app.route("/api/leaderboard/<int:grid_size>")
 def api_leaderboard_by_size(grid_size):
@@ -1669,7 +1625,7 @@ def api_leaderboard_by_size(grid_size):
     if not get_current_user_id():
         return jsonify({"error": "Не авторизован"}), 401
 
-    # Топ по времени
+
     time_top = db.fetch_all("""
         SELECT * FROM (
             SELECT 
@@ -1688,7 +1644,7 @@ def api_leaderboard_by_size(grid_size):
         ORDER BY RN
     """, [grid_size])
 
-    # Топ по ходам
+
     steps_top = db.fetch_all("""
         SELECT * FROM (
             SELECT 
@@ -1714,9 +1670,6 @@ def api_leaderboard_by_size(grid_size):
     })
 
 
-# ================================================================
-# ИСТОРИЯ (ИСПРАВЛЕННАЯ)
-# ================================================================
 
 @app.route("/history")
 def history():
@@ -1725,7 +1678,7 @@ def history():
 
     user_id = get_current_user_id()
 
-    # Получаем все игры пользователя - убираем EXTRACT для сортировки
+
     games = db.fetch_all(
         """SELECT GS.ID AS SESSION_ID, GS.START_TIME, GS.END_TIME,
                   GST.NAME AS STATUS, GS.STEPS_COUNT,
@@ -1741,7 +1694,7 @@ def history():
         [user_id]
     )
 
-    # Получаем статистику по размерам для текущего пользователя
+
     size_stats = db.fetch_all(
         """SELECT 
                   PS.GRID_SIZE,
@@ -1760,7 +1713,7 @@ def history():
         [user_id]
     )
 
-    # Получаем общую статистику
+
     total_stats = db.fetch_one(
         """SELECT 
                   COUNT(*) AS TOTAL_GAMES,
@@ -1785,9 +1738,6 @@ def history():
     )
 
 
-# ================================================================
-# ИСТОРИЯ -- ДЕТАЛИ ИГРЫ (AJAX) - ОБНОВЛЕННАЯ
-# ================================================================
 
 @app.route("/history/game/<int:session_id>")
 def game_details(session_id):
@@ -1796,7 +1746,7 @@ def game_details(session_id):
 
     user_id = get_current_user_id()
 
-    # Проверяем что эта игра принадлежит текущему пользователю
+
     game = db.fetch_one(
         """SELECT GS.ID, GS.START_TIME, GS.END_TIME,
                   GST.NAME AS STATUS, GS.STEPS_COUNT,
@@ -1816,7 +1766,7 @@ def game_details(session_id):
     if not game:
         return jsonify({"error": "Игра не найдена"}), 404
 
-    # История ходов с описанием
+
     steps = db.fetch_all(
         """SELECT GS.STEP_INDEX, AT.NAME AS ACTION,
                   GS.TILE_VALUE, GS.DIRECTION, GS.STEP_TIME, GS.IS_ACTUAL
@@ -1827,7 +1777,7 @@ def game_details(session_id):
         [session_id]
     )
 
-    # Форматируем данные
+
     start_time = game["start_time"]
     end_time = game["end_time"]
 
@@ -1855,7 +1805,7 @@ def game_details(session_id):
     steps_list = []
     for s in steps:
         step_time = s["step_time"]
-        # Создаем описание хода
+
         if s["action"] == 'move' and s["tile_value"]:
             desc = f"Плитка {s['tile_value']}"
         else:
@@ -1886,9 +1836,6 @@ def game_details(session_id):
     })
 
 
-# ================================================================
-# ИСТОРИЯ -- ЭКСПОРТ ИГРЫ (скачать JSON)
-# ================================================================
 
 @app.route("/history/export/<int:session_id>")
 def export_game(session_id):
@@ -1968,10 +1915,7 @@ def export_game(session_id):
     return response
 
 
-# ================================================================
-# ЗАПУСК ПРИЛОЖЕНИЯ
-# ================================================================
 
 if __name__ == "__main__":
-    app.last_cleanup = time.time()  # Инициализируем время последней очистки
+    app.last_cleanup = time.time()
     app.run(debug=True, port=5000)
